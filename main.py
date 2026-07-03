@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 import db
 import pipeline
+import printify
 import upscale
 import worker
 
@@ -110,7 +111,28 @@ def regenerate(design_id: int):
 
 @app.post("/api/designs/{design_id}/publish")
 def publish(design_id: int):
-    raise HTTPException(501, "Publishing arrives in a later task")
+    if not (db.get_setting("printify_api_token") and db.get_setting("printify_shop_id")):
+        raise HTTPException(400, "Printify not configured - add your token and shop ID in settings")
+    with db.connect() as con:
+        row = con.execute(
+            "SELECT * FROM designs WHERE id = ? AND status = 'approved'", (design_id,)
+        ).fetchone()
+    if not row:
+        raise HTTPException(409, "Design must be approved first")
+    row = dict(row)
+    if row["file"]:
+        row["file"] = os.path.join(BASE, row["file"])
+    if row["print_file"]:
+        row["print_file"] = os.path.join(BASE, row["print_file"])
+    try:
+        product_id = printify.publish(row)
+    except Exception as e:
+        raise HTTPException(502, "Printify error: %s" % e)
+    with db.connect() as con:
+        con.execute(
+            "UPDATE designs SET status = 'published', error = NULL WHERE id = ?", (design_id,)
+        )
+    return {"product_id": product_id}
 
 
 @app.get("/api/settings")
