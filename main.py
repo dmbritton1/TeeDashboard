@@ -127,6 +127,9 @@ def publish(design_id: int):
     try:
         product_id = printify.publish(row)
     except Exception as e:
+        msg = ("publish failed: %s" % e)[:500]
+        with db.connect() as con:
+            con.execute("UPDATE designs SET error = ? WHERE id = ?", (msg, design_id))
         raise HTTPException(502, "Printify error: %s" % e)
     with db.connect() as con:
         con.execute(
