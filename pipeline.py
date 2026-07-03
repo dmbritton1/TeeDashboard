@@ -28,3 +28,15 @@ def parse_input(text: str) -> list[tuple[str, str]]:
 def build_prompt(phrase: str, filters: str) -> str:
     style = f"Style: {filters}. " if filters else ""
     return PROMPT_TEMPLATE.format(phrase=phrase, style=style)
+
+
+def generate_image(prompt: str, api_key: str) -> bytes:
+    """Generate one PNG via Gemini. Swappable: replace this to use another model."""
+    from google import genai
+
+    client = genai.Client(api_key=api_key)
+    resp = client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
+    for part in resp.candidates[0].content.parts:
+        if part.inline_data and part.inline_data.data:
+            return part.inline_data.data
+    raise RuntimeError("Gemini returned no image (text: %s)" % (getattr(resp, "text", "") or "empty"))
