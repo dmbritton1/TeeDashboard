@@ -32,12 +32,12 @@ def upscale(design_id: int, src_path: str) -> None:
 
                 img = Image.open(src_path).convert("RGB")
                 result = _get_model().predict(img)
-                out_path = src_path[: -len(".png")] + "_print.png"
+                out_path = os.path.splitext(src_path)[0] + "_print.png"
                 result.save(out_path)
                 rel = os.path.join("designs", os.path.basename(out_path))
                 with db.connect() as con:
                     con.execute(
-                        "UPDATE designs SET print_file = ? WHERE id = ?", (rel, design_id)
+                        "UPDATE designs SET print_file = ?, error = NULL WHERE id = ?", (rel, design_id)
                     )
             except Exception as e:
                 # design stays approved; publish falls back to the 1024px original
