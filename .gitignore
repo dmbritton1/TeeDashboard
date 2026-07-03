@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+.env
+designs.db
+designs/
+weights/
+.pytest_cache/
