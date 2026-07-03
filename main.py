@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 import db
 import pipeline
+import upscale
 import worker
 
 load_dotenv()
@@ -73,6 +74,10 @@ def _set_status(design_id: int, to: str, allowed: tuple[str, ...]) -> None:
 @app.post("/api/designs/{design_id}/approve")
 def approve(design_id: int):
     _set_status(design_id, "approved", ("pending",))
+    with db.connect() as con:
+        row = con.execute("SELECT file FROM designs WHERE id = ?", (design_id,)).fetchone()
+    if row and row["file"]:
+        upscale.upscale(design_id, os.path.join(BASE, row["file"]))
     return {"ok": True}
 
 

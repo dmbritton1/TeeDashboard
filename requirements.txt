@@ -5,3 +5,6 @@ google-genai
 requests
 pillow
 pytest
+torch
+py-real-esrgan
+huggingface_hub==0.19.4
