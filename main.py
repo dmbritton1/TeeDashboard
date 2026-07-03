@@ -17,6 +17,9 @@ load_dotenv()
 BASE = os.path.dirname(os.path.abspath(__file__))
 os.makedirs(os.path.join(BASE, "designs"), exist_ok=True)
 db.init()
+with db.connect() as con:
+    # requeue rows orphaned by a shutdown mid-generation
+    con.execute("UPDATE designs SET status = 'queued' WHERE status = 'generating'")
 worker.start()
 
 app = FastAPI(title="T-Shirt Design Pipeline")
@@ -119,6 +122,8 @@ def publish(design_id: int):
         ).fetchone()
     if not row:
         raise HTTPException(409, "Design must be approved first")
+    if not row["print_file"] and not row["error"]:
+        raise HTTPException(409, "Design is still upscaling - try again shortly")
     row = dict(row)
     if row["file"]:
         row["file"] = os.path.join(BASE, row["file"])

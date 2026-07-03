@@ -10,9 +10,9 @@ Gemini (free tier), review them in a dashboard, approve the keepers
 
 Open http://localhost:8000
 
-First-time setup:
+First-time setup (needs Python 3.10+; this repo's venv was built with uv):
 
-    python3 -m venv .venv
+    uv venv --seed --python 3.12 .venv
     .venv/bin/pip install -r requirements.txt
 
 ## Configure

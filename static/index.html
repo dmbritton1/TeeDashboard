@@ -61,6 +61,7 @@
 <script>
 const TABS = ["pending", "queued", "approved", "published", "failed", "rejected"];
 let tab = "pending", designs = [];
+let stat = {}, busy = 0;
 
 async function api(path, opts) {
   const r = await fetch(path, opts);
@@ -92,9 +93,12 @@ async function saveSettings() {
   document.getElementById("printify_token").value = "";
   refresh();
 }
-async function act(id, action) {
+async function act(btn, id, action) {
+  btn.disabled = true;
+  busy++;
   try { await api(`/api/designs/${id}/${action}`, {method: "POST"}); }
   catch (e) { alert(e.message); }
+  finally { busy--; }
   refresh();
 }
 function esc(s) {
@@ -106,11 +110,13 @@ function card(d) {
     ? `<img src="/${d.file}" loading="lazy">`
     : `<div class="placeholder">${generating ? "generating…" : "no image"}</div>`;
   const buttons = {
-    pending: `<button onclick="act(${d.id},'approve')">✓ Approve</button><button onclick="act(${d.id},'reject')">✕ Reject</button><button onclick="act(${d.id},'regenerate')">↻ Regenerate</button>`,
-    approved: `<button onclick="act(${d.id},'publish')">Publish to Printify</button>` +
+    pending: `<button onclick="act(this,${d.id},'approve')">✓ Approve</button><button onclick="act(this,${d.id},'reject')">✕ Reject</button><button onclick="act(this,${d.id},'regenerate')">↻ Regenerate</button>`,
+    approved: (stat.printify_ready
+        ? `<button onclick="act(this,${d.id},'publish')">Publish to Printify</button>`
+        : `<button disabled>Publish to Printify</button><span class="hint">Printify not configured</span>`) +
       (d.print_file ? '<span class="hint">print-ready ✓</span>' : '<span class="hint">upscaling…</span>'),
-    failed: `<button onclick="act(${d.id},'retry')">Retry</button>`,
-    rejected: `<button onclick="act(${d.id},'retry')">Re-queue</button>`,
+    failed: `<button onclick="act(this,${d.id},'retry')">Retry</button>`,
+    rejected: `<button onclick="act(this,${d.id},'retry')">Re-queue</button>`,
   }[d.status] || "";
   return `<div class="card">${img}<div class="body"><b>${esc(d.phrase)}</b>` +
     `<div class="filters">${esc(d.filters)}</div>` +
@@ -129,8 +135,10 @@ function render() {
   document.getElementById("grid").innerHTML = shown.map(card).join("") || '<p class="hint">nothing here</p>';
 }
 async function refresh() {
+  if (busy) return;
   try {
     const [status, list] = await Promise.all([api("/api/status"), api("/api/designs")]);
+    stat = status;
     designs = list;
     document.getElementById("statusbar").textContent =
       `today: ${status.today}/${status.cap} images · queued: ${status.queued}` +
