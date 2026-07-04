@@ -210,8 +210,23 @@ label { font-size: 13px; color: var(--stone); min-width: 108px; }
 }
 .empty .fleuron { font-family: "Italiana", serif; font-size: 24px; color: var(--gold-soft); display: block; margin-bottom: 12px; }
 
+#snapshot { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-bottom: 18px; }
+.stat-card {
+  position: relative; background: linear-gradient(180deg, var(--slab), var(--slab-deep));
+  border: 1px solid var(--mist); padding: 16px 18px 14px; cursor: pointer;
+  text-align: left; transition: border-color 0.2s;
+}
+.stat-card:hover { border-color: var(--gold-pale); }
+.stat-card .num { font-family: "Italiana", serif; font-size: 34px; color: var(--ivory); line-height: 1; }
+.stat-card .lbl { font-size: 10px; font-weight: 500; letter-spacing: 0.24em; text-transform: uppercase; color: var(--stone); margin-top: 6px; }
+.stat-card.alert .num { color: var(--gold-leaf); }
+#charts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 22px; }
+.chart-title { font-size: 10px; font-weight: 500; letter-spacing: 0.32em; text-transform: uppercase; color: var(--gold-soft); margin-bottom: 12px; }
+.chart-empty { color: var(--stone); font-size: 12.5px; padding: 12px 0; }
+
 @media (max-width: 860px) {
   .app { flex-direction: column; }
+  #charts { grid-template-columns: 1fr; }
   aside { width: 100%; height: auto; position: static; padding: 24px 0 0; border-right: none; border-bottom: 1px solid var(--mist); }
   .brand { border-bottom: none; padding-bottom: 8px; }
   .nav-label { display: none; }

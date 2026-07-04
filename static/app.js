@@ -19,7 +19,24 @@ function tagsOf(d) {
   return [...new Set([...split(d.filters), ...split(d.tags)])];
 }
 
-function renderDashboard() {} // filled in Stage 3
+function renderDashboard() {
+  const counts = {};
+  designs.forEach(d => {
+    const t = d.status === "generating" ? "queued" : d.status;
+    counts[t] = (counts[t] || 0) + 1;
+  });
+  const cards = [
+    { stage: "pending", label: "Awaiting review", n: counts.pending || 0, alert: true },
+    { stage: "queued", label: "In queue", n: counts.queued || 0 },
+    { stage: "approved", label: "Ready to publish", n: counts.approved || 0 },
+    { stage: "failed", label: "Failed", n: counts.failed || 0 },
+  ];
+  document.getElementById("snapshot").innerHTML = cards.map(c =>
+    `<button class="stat-card ${c.alert && c.n ? "alert" : ""}" onclick="tab='${c.stage}';render()">` +
+    `<div class="num">${c.n}</div><div class="lbl">${c.label}</div></button>`).join("");
+  renderCharts();
+}
+function renderCharts() {} // filled in Task 8
 
 const STAGES = [
   { id: "pending",   name: "To review" },
