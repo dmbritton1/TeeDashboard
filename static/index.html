@@ -130,7 +130,9 @@
           <label>Gemini API key</label>
           <input type="password" id="gemini_key" placeholder="paste key from aistudio.google.com">
           <button onclick="saveSettings()">Save</button>
+          <button onclick="testConn('gemini')">Test</button>
           <span class="hint" id="key_state"></span>
+          <span class="hint" id="test_gemini"></span>
         </div>
         <div class="row">
           <label>Printify token</label>
@@ -139,6 +141,10 @@
         <div class="row">
           <label>Shop ID</label>
           <input type="text" id="printify_shop" placeholder="shop id" style="width:140px">
+        </div>
+        <div class="row">
+          <button onclick="testConn('printify')">Test Printify</button>
+          <span class="hint" id="test_printify"></span>
         </div>
       </section>
     </section>

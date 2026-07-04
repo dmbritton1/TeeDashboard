@@ -127,3 +127,36 @@ def test_unreview_guards_status(tmp_path, monkeypatch):
     with pytest.raises(HTTPException) as e:
         main.unreview(did)
     assert e.value.status_code == 409
+
+
+class FakeResp:
+    def __init__(self, status_code=200, payload=None, text=""):
+        self.status_code = status_code
+        self._payload = payload or []
+        self.text = text
+
+    def json(self):
+        return self._payload
+
+
+def test_test_gemini_no_key(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    out = main.test_gemini()
+    assert out == {"ok": False, "message": "No Gemini key saved yet"}
+
+
+def test_test_gemini_ok(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    db.set_setting("gemini_api_key", "k")
+    monkeypatch.setattr(main.requests, "get", lambda *a, **kw: FakeResp(200))
+    assert main.test_gemini()["ok"] is True
+
+
+def test_test_printify_wrong_shop(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    db.set_setting("printify_api_token", "t")
+    db.set_setting("printify_shop_id", "42")
+    monkeypatch.setattr(main.requests, "get",
+                        lambda *a, **kw: FakeResp(200, payload=[{"id": 7, "title": "Other"}]))
+    out = main.test_printify()
+    assert out["ok"] is False and "42" in out["message"]

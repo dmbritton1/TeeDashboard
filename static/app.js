@@ -520,6 +520,16 @@ async function refresh() {
     document.getElementById("badge_pending").textContent = pending || "";
   } catch (e) { document.getElementById("status_text").textContent = "server unreachable"; }
 }
+async function testConn(which) {
+  const el = document.getElementById("test_" + which);
+  el.textContent = "testing…";
+  try {
+    const out = await api("/api/test/" + which, {method: "POST"});
+    el.textContent = (out.ok ? "✓ " : "✗ ") + out.message;
+    el.style.color = out.ok ? "var(--gold-soft)" : "var(--clay)";
+  } catch (e) { el.textContent = "✗ " + e.message; el.style.color = "var(--clay)"; }
+}
+
 let toastTimer;
 function flash(msg, actionLabel, action) {
   const t = document.getElementById("toast");

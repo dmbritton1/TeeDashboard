@@ -1,6 +1,7 @@
 """FastAPI server for the t-shirt design pipeline dashboard."""
 import os
 
+import requests
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
@@ -219,6 +220,45 @@ def save_settings(body: SettingsBody):
         if v.strip():
             db.set_setting(k, v.strip())
     return {"ok": True}
+
+
+@app.post("/api/test/gemini")
+def test_gemini():
+    key = db.get_setting("gemini_api_key")
+    if not key:
+        return {"ok": False, "message": "No Gemini key saved yet"}
+    try:
+        r = requests.get(
+            "https://generativelanguage.googleapis.com/v1beta/models",
+            headers={"x-goog-api-key": key}, timeout=15,
+        )
+    except Exception as e:
+        return {"ok": False, "message": "Couldn't reach Google: %s" % e}
+    if r.status_code == 200:
+        return {"ok": True, "message": "Gemini key works"}
+    return {"ok": False, "message": "Google says: %s" % r.text[:300]}
+
+
+@app.post("/api/test/printify")
+def test_printify():
+    token = db.get_setting("printify_api_token")
+    shop = db.get_setting("printify_shop_id")
+    if not (token and shop):
+        return {"ok": False, "message": "Save a Printify token and shop ID first"}
+    try:
+        r = requests.get(
+            "https://api.printify.com/v1/shops.json",
+            headers={"Authorization": "Bearer %s" % token}, timeout=15,
+        )
+    except Exception as e:
+        return {"ok": False, "message": "Couldn't reach Printify: %s" % e}
+    if r.status_code != 200:
+        return {"ok": False, "message": "Printify says: %s" % r.text[:300]}
+    shops = r.json()
+    if any(str(s.get("id")) == str(shop) for s in shops):
+        return {"ok": True, "message": "Printify connected"}
+    names = ", ".join("%s (%s)" % (s.get("title"), s.get("id")) for s in shops) or "none"
+    return {"ok": False, "message": "Token works, but shop %s isn't on this account. Your shops: %s" % (shop, names)}
 
 
 @app.get("/api/status")
