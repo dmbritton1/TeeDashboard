@@ -226,8 +226,32 @@ async function act(btn, id, action) {
 function esc(s) {
   return (s || "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 }
+const selected = new Set();
+function togglePick(id, on) {
+  on ? selected.add(id) : selected.delete(id);
+  render();
+}
+function selectAllPending(on) {
+  selected.clear();
+  if (on) designs.filter(d => d.status === "pending").forEach(d => selected.add(d.id));
+  render();
+}
+async function bulkAct(action) {
+  const ids = [...selected];
+  selected.clear();
+  busy++;
+  try { await Promise.all(ids.map(id => api(`/api/designs/${id}/${action}`, {method: "POST"}))); }
+  catch (e) { alert(e.message); }
+  finally { busy--; }
+  flash(`${ids.length} design${ids.length === 1 ? "" : "s"} ${action === "approve" ? "approved" : "rejected"}`);
+  refresh();
+}
+
 function card(d, i) {
   const generating = d.status === "queued" || d.status === "generating";
+  const pick = d.status === "pending"
+    ? `<input type="checkbox" class="pick" ${selected.has(d.id) ? "checked" : ""} onclick="togglePick(${d.id}, this.checked)">`
+    : "";
   const img = d.file
     ? `<img src="/${d.file}" loading="lazy" alt="${esc(d.phrase)}">`
     : `<div class="placeholder ${generating ? "working" : ""}">${generating ? "in press…" : "no image"}</div>`;
@@ -241,7 +265,7 @@ function card(d, i) {
     failed: `<button onclick="act(this,${d.id},'retry')">↻ Retry</button><button onclick="removeDesign(this,${d.id},'delete')">🗑 Delete</button>`,
     rejected: `<button onclick="act(this,${d.id},'retry')">↻ Re-queue</button><button onclick="act(this,${d.id},'unreview')">↩ Back to review</button><button onclick="removeDesign(this,${d.id},'delete')">🗑 Delete</button>`,
   }[d.status] || "";
-  return `<div class="card" style="animation-delay:${Math.min(i * 40, 400)}ms"><div class="frame">${img}</div><div class="body"><div class="phrase">${esc(d.phrase)}</div>` +
+  return `<div class="card${selected.has(d.id) ? " selected" : ""}" style="animation-delay:${Math.min(i * 40, 400)}ms"><div class="frame">${pick}${img}</div><div class="body"><div class="phrase">${esc(d.phrase)}</div>` +
     `<div class="filters">${esc(d.filters)}</div>` +
     (d.error ? `<div class="error">${esc(d.error)}</div>` : "") +
     `</div><div class="actions">${buttons}</div></div>`;
@@ -262,8 +286,15 @@ function render() {
   document.getElementById("page_title").textContent = stage.name;
   document.getElementById("page_count").textContent = n === 1 ? "1 design" : `${n} designs`;
   const shown = designs.filter(d => d.status === tab || (tab === "queued" && d.status === "generating"));
-  document.getElementById("grid").innerHTML = shown.map(card).join("") ||
-    `<div class="empty"><span class="fleuron">❦</span>Nothing here yet — commission some ideas above.</div>`;
+  const bulkbar = tab === "pending" && shown.length
+    ? `<div id="bulkbar" style="grid-column:1/-1">
+         <label class="hint"><input type="checkbox" onclick="selectAllPending(this.checked)" ${selected.size && selected.size === shown.length ? "checked" : ""}> Select all</label>
+         ${selected.size ? `<button class="gilt" onclick="bulkAct('approve')">✓ Approve ${selected.size}</button>
+         <button onclick="bulkAct('reject')">✕ Reject ${selected.size}</button>` : `<span class="hint">tick designs to act on several at once</span>`}
+       </div>`
+    : "";
+  document.getElementById("grid").innerHTML = bulkbar + (shown.map(card).join("") ||
+    `<div class="empty"><span class="fleuron">❦</span>Nothing here yet — commission some ideas above.</div>`);
 }
 const libState = { q: "", statuses: new Set(), tags: new Set(), minRating: 0, from: "", to: "", sort: "new" };
 function libReset() {
@@ -410,6 +441,7 @@ async function refresh() {
     const [status, list] = await Promise.all([api("/api/status"), api("/api/designs")]);
     stat = status;
     designs = list;
+    [...selected].forEach(id => { const d = designs.find(x => x.id === id); if (!d || d.status !== "pending") selected.delete(id); });
     document.getElementById("status_text").textContent = status.local
       ? `local GPU · ${status.queued} in press`
       : `today: ${status.today}/${status.cap} images · ${status.queued} in press` +

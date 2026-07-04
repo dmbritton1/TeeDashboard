@@ -255,6 +255,10 @@ select, input[type=date] {
 .lb-row input { width: 100%; }
 @media (max-width: 700px) { #lightbox_inner { grid-template-columns: 1fr; } }
 
+#bulkbar { display: flex; gap: 10px; align-items: center; margin: 0 0 14px; }
+.card .pick { position: absolute; top: 16px; left: 16px; z-index: 3; width: 17px; height: 17px; accent-color: var(--gold); }
+.card.selected { border-color: var(--gold); }
+
 #toast {
   position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%);
   background: var(--slab); border: 1px solid var(--gold-pale); color: var(--ivory);
