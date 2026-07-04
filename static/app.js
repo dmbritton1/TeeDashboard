@@ -205,6 +205,16 @@ async function saveSettings() {
   document.getElementById("printify_token").value = "";
   refresh();
 }
+async function removeDesign(btn, id, verb) {
+  if (verb === "delete" && !confirm("Delete this design and its image files permanently?")) return;
+  btn.disabled = true;
+  busy++;
+  try { await api(`/api/designs/${id}`, {method: "DELETE"}); }
+  catch (e) { alert(e.message); }
+  finally { busy--; }
+  refresh();
+}
+
 async function act(btn, id, action) {
   btn.disabled = true;
   busy++;
@@ -227,8 +237,9 @@ function card(d, i) {
         ? `<button class="gilt" onclick="act(this,${d.id},'publish')">Publish to Printify</button>`
         : `<button disabled>Publish to Printify</button><span class="tag">Printify not configured</span>`) +
       (d.print_file ? '<span class="tag ok">print-ready ✓</span>' : '<span class="tag">upscaling…</span>'),
-    failed: `<button onclick="act(this,${d.id},'retry')">↻ Retry</button>`,
-    rejected: `<button onclick="act(this,${d.id},'retry')">↻ Re-queue</button>`,
+    queued: `<button onclick="removeDesign(this,${d.id},'cancel')">✕ Cancel</button>`,
+    failed: `<button onclick="act(this,${d.id},'retry')">↻ Retry</button><button onclick="removeDesign(this,${d.id},'delete')">🗑 Delete</button>`,
+    rejected: `<button onclick="act(this,${d.id},'retry')">↻ Re-queue</button><button onclick="act(this,${d.id},'unreview')">↩ Back to review</button><button onclick="removeDesign(this,${d.id},'delete')">🗑 Delete</button>`,
   }[d.status] || "";
   return `<div class="card" style="animation-delay:${Math.min(i * 40, 400)}ms"><div class="frame">${img}</div><div class="body"><div class="phrase">${esc(d.phrase)}</div>` +
     `<div class="filters">${esc(d.filters)}</div>` +
@@ -407,6 +418,9 @@ async function refresh() {
     document.querySelector("#statusbar .dot").classList.toggle("live", status.queued > 0);
     document.getElementById("key_state").textContent = status.has_key ? "key saved ✓" : "no key saved";
     render();
+    const pending = designs.filter(d => d.status === "pending").length;
+    document.title = (pending ? `(${pending}) ` : "") + "The Atelier — T-Shirt Design House";
+    document.getElementById("badge_pending").textContent = pending || "";
   } catch (e) { document.getElementById("status_text").textContent = "server unreachable"; }
 }
 let toastTimer;
