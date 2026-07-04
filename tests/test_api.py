@@ -152,6 +152,16 @@ def test_test_gemini_ok(tmp_path, monkeypatch):
     assert main.test_gemini()["ok"] is True
 
 
+def test_export_csv(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    insert("published", tags="funny", rating=4, product_id="p1")
+    resp = main.export_csv()
+    body = resp.body.decode()
+    lines = body.strip().splitlines()
+    assert lines[0] == "id,phrase,style,status,tags,rating,product_id,created_at"
+    assert "dog dad" in lines[1] and "p1" in lines[1]
+
+
 def test_test_printify_wrong_shop(tmp_path, monkeypatch):
     main = load_main(tmp_path, monkeypatch)
     db.set_setting("printify_api_token", "t")

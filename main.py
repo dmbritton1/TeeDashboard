@@ -1,10 +1,12 @@
 """FastAPI server for the t-shirt design pipeline dashboard."""
+import csv
+import io
 import os
 
 import requests
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -259,6 +261,24 @@ def test_printify():
         return {"ok": True, "message": "Printify connected"}
     names = ", ".join("%s (%s)" % (s.get("title"), s.get("id")) for s in shops) or "none"
     return {"ok": False, "message": "Token works, but shop %s isn't on this account. Your shops: %s" % (shop, names)}
+
+
+@app.get("/api/export.csv")
+def export_csv():
+    with db.connect() as con:
+        rows = con.execute(
+            "SELECT id, phrase, filters, status, tags, rating, product_id, created_at "
+            "FROM designs ORDER BY id"
+        ).fetchall()
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["id", "phrase", "style", "status", "tags", "rating", "product_id", "created_at"])
+    for r in rows:
+        w.writerow(list(r))
+    return Response(
+        content=buf.getvalue(), media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="atelier-designs.csv"'},
+    )
 
 
 @app.get("/api/status")
