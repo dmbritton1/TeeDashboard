@@ -1,5 +1,6 @@
 """Endpoint tests by direct function call (no HTTP client needed)."""
 import importlib
+import zipfile
 
 import pytest
 from fastapi import HTTPException
@@ -160,6 +161,17 @@ def test_export_csv(tmp_path, monkeypatch):
     lines = body.strip().splitlines()
     assert lines[0] == "id,phrase,style,status,tags,rating,product_id,created_at"
     assert "dog dad" in lines[1] and "p1" in lines[1]
+
+
+def test_backup_zip_contains_db_and_images(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    img = tmp_path / "designs" / "1.png"
+    img.parent.mkdir(exist_ok=True)
+    img.write_bytes(b"png")
+    resp = main.backup()
+    with zipfile.ZipFile(resp.path) as z:
+        names = z.namelist()
+    assert "designs.db" in names and "designs/1.png" in names
 
 
 def test_test_printify_wrong_shop(tmp_path, monkeypatch):

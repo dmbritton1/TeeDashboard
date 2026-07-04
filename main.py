@@ -1,7 +1,10 @@
 """FastAPI server for the t-shirt design pipeline dashboard."""
 import csv
+import datetime
 import io
 import os
+import tempfile
+import zipfile
 
 import requests
 from dotenv import load_dotenv
@@ -9,6 +12,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.background import BackgroundTask
 
 import db
 import pipeline
@@ -279,6 +283,22 @@ def export_csv():
         content=buf.getvalue(), media_type="text/csv",
         headers={"Content-Disposition": 'attachment; filename="atelier-designs.csv"'},
     )
+
+
+@app.get("/api/backup")
+def backup():
+    fd, path = tempfile.mkstemp(suffix=".zip")
+    os.close(fd)
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.write(db.DB_PATH, "designs.db")
+        ddir = os.path.join(BASE, "designs")
+        for name in sorted(os.listdir(ddir)):
+            full = os.path.join(ddir, name)
+            if os.path.isfile(full):
+                z.write(full, "designs/" + name)
+    fname = "atelier-backup-%s.zip" % datetime.date.today().isoformat()
+    return FileResponse(path, filename=fname, media_type="application/zip",
+                        background=BackgroundTask(os.remove, path))
 
 
 @app.get("/api/status")

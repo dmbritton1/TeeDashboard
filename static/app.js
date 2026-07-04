@@ -518,6 +518,9 @@ async function refresh() {
     const pending = designs.filter(d => d.status === "pending").length;
     document.title = (pending ? `(${pending}) ` : "") + "The Atelier — T-Shirt Design House";
     document.getElementById("badge_pending").textContent = pending || "";
+    document.getElementById("gen_info").textContent = status.local
+      ? "Generating on your local GPU — no daily cap."
+      : `Gemini free tier: ${status.today}/${status.cap} images used today · 2 variations per idea · ~2 images/min.`;
   } catch (e) { document.getElementById("status_text").textContent = "server unreachable"; }
 }
 async function testConn(which) {
