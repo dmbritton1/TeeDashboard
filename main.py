@@ -37,6 +37,11 @@ class GenerateBody(BaseModel):
     variations: int = 2
 
 
+class PatchBody(BaseModel):
+    tags: str | None = None
+    rating: int | None = None
+
+
 class SettingsBody(BaseModel):
     gemini_api_key: str = ""
     printify_api_token: str = ""
@@ -63,6 +68,26 @@ def list_designs():
     with db.connect() as con:
         rows = con.execute("SELECT * FROM designs ORDER BY id DESC").fetchall()
     return [dict(r) for r in rows]
+
+
+@app.patch("/api/designs/{design_id}")
+def patch_design(design_id: int, body: PatchBody):
+    sets, vals = [], []
+    if body.tags is not None:
+        sets.append("tags = ?")
+        vals.append(body.tags.strip())
+    if body.rating is not None:
+        sets.append("rating = ?")
+        vals.append(max(0, min(5, body.rating)))
+    if not sets:
+        raise HTTPException(400, "Nothing to update")
+    with db.connect() as con:
+        cur = con.execute(
+            "UPDATE designs SET %s WHERE id = ?" % ", ".join(sets), (*vals, design_id)
+        )
+        if cur.rowcount == 0:
+            raise HTTPException(404, "Design not found")
+    return {"ok": True}
 
 
 def _set_status(design_id: int, to: str, allowed: tuple[str, ...]) -> None:

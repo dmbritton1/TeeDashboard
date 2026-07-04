@@ -46,6 +46,31 @@ def test_unreview_returns_to_pending(tmp_path, monkeypatch):
     assert row["status"] == "pending" and row["reviewed_at"] is None
 
 
+def test_patch_tags_and_rating(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    did = insert("pending")
+    main.patch_design(did, main.PatchBody(tags="funny, dog", rating=9))
+    with db.connect() as con:
+        row = con.execute("SELECT * FROM designs WHERE id = ?", (did,)).fetchone()
+    assert row["tags"] == "funny, dog"
+    assert row["rating"] == 5  # clamped
+
+
+def test_patch_missing_design_404(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    with pytest.raises(HTTPException) as e:
+        main.patch_design(999, main.PatchBody(rating=3))
+    assert e.value.status_code == 404
+
+
+def test_patch_empty_body_400(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    did = insert("pending")
+    with pytest.raises(HTTPException) as e:
+        main.patch_design(did, main.PatchBody())
+    assert e.value.status_code == 400
+
+
 def test_unreview_guards_status(tmp_path, monkeypatch):
     main = load_main(tmp_path, monkeypatch)
     did = insert("queued")
