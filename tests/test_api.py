@@ -98,6 +98,29 @@ def test_delete_missing_404(tmp_path, monkeypatch):
     assert e.value.status_code == 404
 
 
+def test_publish_stores_product_id(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    db.set_setting("printify_api_token", "t")
+    db.set_setting("printify_shop_id", "s")
+    pf = tmp_path / "designs" / "7-print.png"
+    pf.parent.mkdir(exist_ok=True)
+    pf.write_bytes(b"png")
+    did = insert("approved", file="designs/7-print.png", print_file="designs/7-print.png")
+    monkeypatch.setattr(main.printify, "publish", lambda row: "prod-123")
+    main.publish(did)
+    with db.connect() as con:
+        row = con.execute("SELECT * FROM designs WHERE id = ?", (did,)).fetchone()
+    assert row["status"] == "published" and row["product_id"] == "prod-123"
+
+
+def test_settings_roundtrips_prompt_template(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    out = main.get_settings()
+    assert out["prompt_template"] == main.DEFAULT_PROMPT
+    main.save_settings(main.SettingsBody(prompt_template="my prompt"))
+    assert main.get_settings()["prompt_template"] == "my prompt"
+
+
 def test_unreview_guards_status(tmp_path, monkeypatch):
     main = load_main(tmp_path, monkeypatch)
     did = insert("queued")

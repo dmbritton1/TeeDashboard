@@ -15,6 +15,11 @@ import worker
 
 load_dotenv()
 BASE = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_PROMPT = (
+    "Give me 20 t-shirt design ideas for [niche]. "
+    "Format each as one line: phrase | style keywords. "
+    "Example: reel cool dad | vintage, distressed, lake colors"
+)
 os.makedirs(os.path.join(BASE, "designs"), exist_ok=True)
 db.init()
 with db.connect() as con:
@@ -46,6 +51,7 @@ class SettingsBody(BaseModel):
     gemini_api_key: str = ""
     printify_api_token: str = ""
     printify_shop_id: str = ""
+    prompt_template: str = ""
 
 
 @app.post("/api/generate")
@@ -193,7 +199,8 @@ def publish(design_id: int):
         raise HTTPException(502, "Printify error: %s" % e)
     with db.connect() as con:
         con.execute(
-            "UPDATE designs SET status = 'published', error = NULL WHERE id = ?", (design_id,)
+            "UPDATE designs SET status = 'published', error = NULL, product_id = ? WHERE id = ?",
+            (str(product_id), design_id),
         )
     return {"product_id": product_id}
 
@@ -201,7 +208,9 @@ def publish(design_id: int):
 @app.get("/api/settings")
 def get_settings():
     keys = ("gemini_api_key", "printify_api_token", "printify_shop_id")
-    return {k: bool(db.get_setting(k)) for k in keys}
+    out = {k: bool(db.get_setting(k)) for k in keys}
+    out["prompt_template"] = db.get_setting("prompt_template") or DEFAULT_PROMPT
+    return out
 
 
 @app.post("/api/settings")
