@@ -342,7 +342,57 @@ function renderLibrary() {
   document.getElementById("lib_grid").innerHTML = rows.map(libCard).join("") ||
     `<div class="empty"><span class="fleuron">❦</span>No designs match — clear a filter or two.</div>`;
 }
-function openLightbox(id) {} // filled in Task 12
+let lbId = null;
+function openLightbox(id) { lbId = id; renderLightbox(); }
+function closeLightbox() { lbId = null; document.getElementById("lightbox").hidden = true; }
+function lbMove(dir) {
+  const rows = libFiltered().filter(d => d.file);
+  const i = rows.findIndex(d => d.id === lbId);
+  const next = rows[i + dir];
+  if (next) { lbId = next.id; renderLightbox(); }
+}
+async function saveTags(id) {
+  try {
+    await api(`/api/designs/${id}`, {method: "PATCH", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({tags: document.getElementById("lb_tags").value})});
+    const d = designs.find(x => x.id === id);
+    if (d) d.tags = document.getElementById("lb_tags").value;
+    flash("Tags saved");
+    renderLibrary();
+  } catch (e) { alert(e.message); }
+}
+function renderLightbox() {
+  const d = designs.find(x => x.id === lbId);
+  if (!d) { closeLightbox(); return; }
+  const st = d.status === "generating" ? "queued" : d.status;
+  const actions = {
+    pending: `<button class="gilt" onclick="act(this,${d.id},'approve');closeLightbox()">✓ Approve</button>
+              <button onclick="act(this,${d.id},'reject');closeLightbox()">✕ Reject</button>`,
+    approved: `<button onclick="act(this,${d.id},'unreview');closeLightbox()">↩ Back to review</button>`,
+    rejected: `<button onclick="act(this,${d.id},'unreview');closeLightbox()">↩ Back to review</button>`,
+    failed: `<button onclick="act(this,${d.id},'retry');closeLightbox()">↻ Retry</button>`,
+  }[st] || "";
+  document.getElementById("lightbox_inner").innerHTML =
+    `<div>${d.file ? `<img src="/${d.file}" alt="${esc(d.phrase)}">` : `<div class="placeholder">no image</div>`}</div>` +
+    `<div><h3>${esc(d.phrase)}</h3>` +
+    `<div class="lb-row"><span class="status-chip">${st}</span> · ${(d.created_at || "").slice(0, 10)}</div>` +
+    `<div class="lb-row">${stars(d)}</div>` +
+    `<div class="lb-row">Style: ${esc(d.filters) || "—"}</div>` +
+    `<div class="lb-row">Your tags<br><input type="text" id="lb_tags" value="${esc(d.tags || "")}" placeholder="comma, separated"> ` +
+    `<button style="margin-top:6px" onclick="saveTags(${d.id})">Save tags</button></div>` +
+    (d.error ? `<div class="lb-row" style="color:var(--clay)">${esc(d.error)}</div>` : "") +
+    `<div class="lb-row">` +
+    (d.print_file ? `<a href="/${d.print_file}" download><button>Download print file</button></a> ` : "") +
+    (d.product_id ? `<a href="https://printify.com/app/products/${encodeURIComponent(d.product_id)}" target="_blank" rel="noopener"><button>Open in Printify</button></a>` : "") +
+    `</div><div class="lb-row">${actions}</div></div>`;
+  document.getElementById("lightbox").hidden = false;
+}
+document.addEventListener("keydown", (ev) => {
+  if (lbId === null) return;
+  if (ev.key === "Escape") closeLightbox();
+  if (ev.key === "ArrowRight") lbMove(1);
+  if (ev.key === "ArrowLeft") lbMove(-1);
+});
 async function refresh() {
   if (busy) return;
   try {
