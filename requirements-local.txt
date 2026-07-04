@@ -1,0 +1,6 @@
+# Extras for generating images on a local NVIDIA GPU (see README "Local generation")
+diffusers
+transformers
+accelerate
+sentencepiece
+protobuf

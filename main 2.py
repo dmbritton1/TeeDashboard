@@ -9,7 +9,6 @@ from pydantic import BaseModel
 
 import db
 import pipeline
-import printify
 import upscale
 import worker
 
@@ -17,9 +16,6 @@ load_dotenv()
 BASE = os.path.dirname(os.path.abspath(__file__))
 os.makedirs(os.path.join(BASE, "designs"), exist_ok=True)
 db.init()
-with db.connect() as con:
-    # requeue rows orphaned by a shutdown mid-generation
-    con.execute("UPDATE designs SET status = 'queued' WHERE status = 'generating'")
 worker.start()
 
 app = FastAPI(title="T-Shirt Design Pipeline")
@@ -114,33 +110,7 @@ def regenerate(design_id: int):
 
 @app.post("/api/designs/{design_id}/publish")
 def publish(design_id: int):
-    if not (db.get_setting("printify_api_token") and db.get_setting("printify_shop_id")):
-        raise HTTPException(400, "Printify not configured - add your token and shop ID in settings")
-    with db.connect() as con:
-        row = con.execute(
-            "SELECT * FROM designs WHERE id = ? AND status = 'approved'", (design_id,)
-        ).fetchone()
-    if not row:
-        raise HTTPException(409, "Design must be approved first")
-    if not row["print_file"] and not row["error"]:
-        raise HTTPException(409, "Design is still upscaling - try again shortly")
-    row = dict(row)
-    if row["file"]:
-        row["file"] = os.path.join(BASE, row["file"])
-    if row["print_file"]:
-        row["print_file"] = os.path.join(BASE, row["print_file"])
-    try:
-        product_id = printify.publish(row)
-    except Exception as e:
-        msg = ("publish failed: %s" % e)[:500]
-        with db.connect() as con:
-            con.execute("UPDATE designs SET error = ? WHERE id = ?", (msg, design_id))
-        raise HTTPException(502, "Printify error: %s" % e)
-    with db.connect() as con:
-        con.execute(
-            "UPDATE designs SET status = 'published', error = NULL WHERE id = ?", (design_id,)
-        )
-    return {"product_id": product_id}
+    raise HTTPException(501, "Publishing arrives in a later task")
 
 
 @app.get("/api/settings")
@@ -168,8 +138,7 @@ def status():
         "today": today,
         "cap": worker.DAILY_CAP,
         "queued": queued,
-        "paused": not pipeline.has_local() and today >= worker.DAILY_CAP,
-        "local": pipeline.has_local(),
+        "paused": today >= worker.DAILY_CAP,
         "has_key": bool(db.get_setting("gemini_api_key")),
         "printify_ready": bool(
             db.get_setting("printify_api_token") and db.get_setting("printify_shop_id")

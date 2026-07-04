@@ -40,3 +40,40 @@ def generate_image(prompt: str, api_key: str) -> bytes:
         if part.inline_data and part.inline_data.data:
             return part.inline_data.data
     raise RuntimeError("Gemini returned no image (text: %s)" % (getattr(resp, "text", "") or "empty"))
+
+
+_has_local = None
+_flux = None
+
+
+def has_local() -> bool:
+    """True when an NVIDIA GPU is available: generate locally instead of via Gemini."""
+    global _has_local
+    if _has_local is None:
+        try:
+            import torch
+
+            _has_local = torch.cuda.is_available()
+        except Exception:
+            _has_local = False
+    return _has_local
+
+
+def generate_image_local(prompt: str) -> bytes:
+    """Generate one PNG with FLUX.1-schnell on the local GPU (needs requirements-local.txt)."""
+    global _flux
+    import io
+
+    import torch
+    from diffusers import FluxPipeline
+
+    if _flux is None:
+        pipe = FluxPipeline.from_pretrained(
+            "black-forest-labs/FLUX.1-schnell", torch_dtype=torch.bfloat16
+        )
+        pipe.enable_model_cpu_offload()  # streams weights through VRAM, fits 24GB cards
+        _flux = pipe
+    img = _flux(prompt, num_inference_steps=4, guidance_scale=0.0, width=1024, height=1024).images[0]
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return buf.getvalue()

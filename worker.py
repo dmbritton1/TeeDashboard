@@ -13,8 +13,9 @@ DESIGNS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "designs"
 
 def process_next() -> bool:
     """Generate one queued design. Returns True if work was attempted."""
+    local = pipeline.has_local()
     key = db.get_setting("gemini_api_key")
-    if not key or db.images_today() >= DAILY_CAP:
+    if not local and (not key or db.images_today() >= DAILY_CAP):
         return False
     with db.connect() as con:
         row = con.execute(
@@ -24,11 +25,13 @@ def process_next() -> bool:
             return False
         con.execute("UPDATE designs SET status = 'generating' WHERE id = ?", (row["id"],))
     try:
-        png = pipeline.generate_image(pipeline.build_prompt(row["phrase"], row["filters"]), key)
+        prompt = pipeline.build_prompt(row["phrase"], row["filters"])
+        png = pipeline.generate_image_local(prompt) if local else pipeline.generate_image(prompt, key)
         os.makedirs(DESIGNS_DIR, exist_ok=True)
         with open(os.path.join(DESIGNS_DIR, "%d.png" % row["id"]), "wb") as f:
             f.write(png)
-        db.record_image()
+        if not local:
+            db.record_image()  # daily cap only meters Gemini free-tier calls
         with db.connect() as con:
             con.execute(
                 "UPDATE designs SET status = 'pending', file = ?, error = NULL WHERE id = ?",
@@ -56,7 +59,8 @@ def run() -> None:
             worked = process_next()
         except Exception:
             worked = False  # never let the worker thread die
-        time.sleep(SECONDS_BETWEEN if worked else 2)
+        # Gemini free tier needs 31s pacing; a local GPU can go back-to-back
+        time.sleep(SECONDS_BETWEEN if worked and not pipeline.has_local() else 2)
 
 
 def start() -> None:

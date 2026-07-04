@@ -2,9 +2,10 @@ import db
 import worker
 
 
-def setup_tmp(tmp_path, monkeypatch):
+def setup_tmp(tmp_path, monkeypatch, local=False):
     monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "test.db"))
     monkeypatch.setattr(worker, "DESIGNS_DIR", str(tmp_path / "designs"))
+    monkeypatch.setattr(worker.pipeline, "has_local", lambda: local)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     db.init()
 
@@ -49,6 +50,17 @@ def test_generates_writes_file_and_counts(tmp_path, monkeypatch):
     assert row["status"] == "pending"
     assert row["file"] == "designs/%d.png" % row["id"]
     assert db.images_today() == 1
+
+
+def test_local_gpu_needs_no_key_and_skips_cap(tmp_path, monkeypatch):
+    setup_tmp(tmp_path, monkeypatch, local=True)
+    monkeypatch.setattr(worker.pipeline, "generate_image_local", lambda prompt: b"fake-png")
+    queue_one()
+    assert worker.process_next() is True
+    with db.connect() as con:
+        row = con.execute("SELECT * FROM designs").fetchone()
+    assert row["status"] == "pending"
+    assert db.images_today() == 0  # local generations don't consume the Gemini cap
 
 
 def test_failure_marks_failed_with_error(tmp_path, monkeypatch):
