@@ -265,7 +265,7 @@ function card(d, i) {
     failed: `<button onclick="act(this,${d.id},'retry')">↻ Retry</button><button onclick="removeDesign(this,${d.id},'delete')">🗑 Delete</button>`,
     rejected: `<button onclick="act(this,${d.id},'retry')">↻ Re-queue</button><button onclick="act(this,${d.id},'unreview')">↩ Back to review</button><button onclick="removeDesign(this,${d.id},'delete')">🗑 Delete</button>`,
   }[d.status] || "";
-  return `<div class="card${selected.has(d.id) ? " selected" : ""}" style="animation-delay:${Math.min(i * 40, 400)}ms"><div class="frame">${pick}${img}</div><div class="body"><div class="phrase">${esc(d.phrase)}</div>` +
+  return `<div class="card${selected.has(d.id) ? " selected" : ""}" data-id="${d.id}" style="animation-delay:${Math.min(i * 40, 400)}ms"><div class="frame">${pick}${img}</div><div class="body"><div class="phrase">${esc(d.phrase)}</div>` +
     `<div class="filters">${esc(d.filters)}</div>` +
     (d.error ? `<div class="error">${esc(d.error)}</div>` : "") +
     `</div><div class="actions">${buttons}</div></div>`;
@@ -293,6 +293,7 @@ function render() {
          <button onclick="bulkAct('reject')">✕ Reject ${selected.size}</button>` : `<span class="hint">tick designs to act on several at once</span>`}
        </div>`
     : "";
+  const legend = `<div id="keylegend" style="grid-column:1/-1"><b>→/←</b> move · <b>A</b> approve · <b>R</b> reject · <b>U</b> undo · <b>space</b> zoom</div>`;
   let cardsHtml;
   if (tab === "pending") {
     const groups = new Map();
@@ -310,9 +311,56 @@ function render() {
   } else {
     cardsHtml = shown.map(card).join("");
   }
-  document.getElementById("grid").innerHTML = bulkbar + (cardsHtml ||
+  document.getElementById("grid").innerHTML =
+    (tab === "pending" && cardsHtml ? legend : "") + bulkbar + (cardsHtml ||
     `<div class="empty"><span class="fleuron">❦</span>Nothing here yet — commission some ideas above.</div>`);
+  kbHighlight();
 }
+
+let kbIndex = -1, lastAction = null;
+function pendingIds() { return designs.filter(d => d.status === "pending").map(d => d.id); }
+function kbHighlight() {
+  document.querySelectorAll(".card.kbfocus").forEach(c => c.classList.remove("kbfocus"));
+  const ids = pendingIds();
+  if (kbIndex < 0 || kbIndex >= ids.length) return;
+  const el = document.querySelector(`.card[data-id="${ids[kbIndex]}"]`);
+  if (el) { el.classList.add("kbfocus"); el.scrollIntoView({block: "nearest", behavior: "smooth"}); }
+}
+async function kbAct(action) {
+  const ids = pendingIds();
+  if (kbIndex < 0 || kbIndex >= ids.length) return;
+  const id = ids[kbIndex];
+  lastAction = { id, action };
+  busy++;
+  try { await api(`/api/designs/${id}/${action}`, {method: "POST"}); }
+  catch (e) { alert(e.message); }
+  finally { busy--; }
+  flash(`${action === "approve" ? "Approved" : "Rejected"} — press U to undo`, "Undo", undoLast);
+  await refresh();
+  kbIndex = Math.min(kbIndex, pendingIds().length - 1);
+  kbHighlight();
+}
+async function undoLast() {
+  if (!lastAction) return;
+  try { await api(`/api/designs/${lastAction.id}/unreview`, {method: "POST"}); flash("Moved back to review"); }
+  catch (e) { alert(e.message); }
+  lastAction = null;
+  refresh();
+}
+document.addEventListener("keydown", (ev) => {
+  if (lbId !== null) return; // lightbox has its own keys
+  if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) return;
+  if (currentView() !== "dashboard" || tab !== "pending") return;
+  const ids = pendingIds();
+  if (!ids.length) return;
+  const k = ev.key.toLowerCase();
+  if (k === "arrowright" || k === "j") { kbIndex = Math.min(kbIndex + 1, ids.length - 1); kbHighlight(); }
+  else if (k === "arrowleft" || k === "k") { kbIndex = Math.max(kbIndex - 1, 0); kbHighlight(); }
+  else if (k === "a") kbAct("approve");
+  else if (k === "r") kbAct("reject");
+  else if (k === "u") undoLast();
+  else if (k === " " && kbIndex >= 0) { ev.preventDefault(); openLightbox(ids[kbIndex]); }
+});
 const libState = { q: "", statuses: new Set(), tags: new Set(), minRating: 0, from: "", to: "", sort: "new" };
 function libReset() {
   Object.assign(libState, { q: "", minRating: 0, from: "", to: "", sort: "new" });

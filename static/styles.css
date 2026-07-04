@@ -264,6 +264,10 @@ select, input[type=date] {
 .vargroup .vg-head .vg-style { font: 11px var(--mono); color: var(--stone); margin-left: 10px; }
 .vargroup .vg-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 18px; }
 
+.card.kbfocus { outline: 2px solid var(--gold); outline-offset: 3px; }
+#keylegend { font: 10.5px var(--mono); color: var(--stone); margin: 0 0 12px; }
+#keylegend b { color: var(--gold-soft); font-weight: 500; }
+
 #toast {
   position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%);
   background: var(--slab); border: 1px solid var(--gold-pale); color: var(--ivory);
