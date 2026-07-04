@@ -1,0 +1,54 @@
+"""Endpoint tests by direct function call (no HTTP client needed)."""
+import importlib
+
+import pytest
+from fastapi import HTTPException
+
+import db
+import worker
+
+
+def load_main(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setattr(worker, "start", lambda: None)
+    import main
+    main = importlib.reload(main)
+    monkeypatch.setattr(main, "BASE", str(tmp_path))
+    return main
+
+
+def insert(status="pending", **kw):
+    row = {"phrase": "dog dad", "filters": "vintage", "status": status, **kw}
+    with db.connect() as con:
+        cur = con.execute(
+            "INSERT INTO designs (%s) VALUES (%s)"
+            % (", ".join(row), ", ".join("?" * len(row))),
+            tuple(row.values()),
+        )
+        return cur.lastrowid
+
+
+def test_approve_sets_reviewed_at(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    did = insert("pending")
+    main.approve(did)
+    with db.connect() as con:
+        row = con.execute("SELECT * FROM designs WHERE id = ?", (did,)).fetchone()
+    assert row["status"] == "approved" and row["reviewed_at"]
+
+
+def test_unreview_returns_to_pending(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    did = insert("rejected", reviewed_at="2026-07-01 00:00:00")
+    main.unreview(did)
+    with db.connect() as con:
+        row = con.execute("SELECT * FROM designs WHERE id = ?", (did,)).fetchone()
+    assert row["status"] == "pending" and row["reviewed_at"] is None
+
+
+def test_unreview_guards_status(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    did = insert("queued")
+    with pytest.raises(HTTPException) as e:
+        main.unreview(did)
+    assert e.value.status_code == 409

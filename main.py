@@ -80,6 +80,7 @@ def _set_status(design_id: int, to: str, allowed: tuple[str, ...]) -> None:
 def approve(design_id: int):
     _set_status(design_id, "approved", ("pending",))
     with db.connect() as con:
+        con.execute("UPDATE designs SET reviewed_at = datetime('now') WHERE id = ?", (design_id,))
         row = con.execute("SELECT file FROM designs WHERE id = ?", (design_id,)).fetchone()
     if row and row["file"]:
         upscale.upscale(design_id, os.path.join(BASE, row["file"]))
@@ -89,6 +90,8 @@ def approve(design_id: int):
 @app.post("/api/designs/{design_id}/reject")
 def reject(design_id: int):
     _set_status(design_id, "rejected", ("pending",))
+    with db.connect() as con:
+        con.execute("UPDATE designs SET reviewed_at = datetime('now') WHERE id = ?", (design_id,))
     return {"ok": True}
 
 
@@ -110,6 +113,14 @@ def regenerate(design_id: int):
             "INSERT INTO designs (phrase, filters, status) VALUES (?, ?, 'queued')",
             (row["phrase"], row["filters"]),
         )
+    return {"ok": True}
+
+
+@app.post("/api/designs/{design_id}/unreview")
+def unreview(design_id: int):
+    _set_status(design_id, "pending", ("approved", "rejected"))
+    with db.connect() as con:
+        con.execute("UPDATE designs SET reviewed_at = NULL WHERE id = ?", (design_id,))
     return {"ok": True}
 
 
