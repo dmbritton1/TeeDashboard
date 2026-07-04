@@ -71,6 +71,33 @@ def test_patch_empty_body_400(tmp_path, monkeypatch):
     assert e.value.status_code == 400
 
 
+def test_delete_rejected_removes_row_and_files(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    img = tmp_path / "designs" / "9.png"
+    img.parent.mkdir(exist_ok=True)
+    img.write_bytes(b"png")
+    did = insert("rejected", file="designs/9.png")
+    main.delete_design(did)
+    with db.connect() as con:
+        assert con.execute("SELECT COUNT(*) c FROM designs").fetchone()["c"] == 0
+    assert not img.exists()
+
+
+def test_delete_guards_status(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    did = insert("approved")
+    with pytest.raises(HTTPException) as e:
+        main.delete_design(did)
+    assert e.value.status_code == 409
+
+
+def test_delete_missing_404(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    with pytest.raises(HTTPException) as e:
+        main.delete_design(1)
+    assert e.value.status_code == 404
+
+
 def test_unreview_guards_status(tmp_path, monkeypatch):
     main = load_main(tmp_path, monkeypatch)
     did = insert("queued")

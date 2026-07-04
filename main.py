@@ -90,6 +90,24 @@ def patch_design(design_id: int, body: PatchBody):
     return {"ok": True}
 
 
+@app.delete("/api/designs/{design_id}")
+def delete_design(design_id: int):
+    with db.connect() as con:
+        row = con.execute("SELECT * FROM designs WHERE id = ?", (design_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Design not found")
+        if row["status"] not in ("queued", "rejected", "failed"):
+            raise HTTPException(409, "Only queued, rejected, or failed designs can be deleted")
+        con.execute("DELETE FROM designs WHERE id = ?", (design_id,))
+    for f in (row["file"], row["print_file"]):
+        if f:
+            try:
+                os.remove(os.path.join(BASE, f))
+            except FileNotFoundError:
+                pass
+    return {"ok": True}
+
+
 def _set_status(design_id: int, to: str, allowed: tuple[str, ...]) -> None:
     with db.connect() as con:
         cur = con.execute(
