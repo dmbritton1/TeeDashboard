@@ -293,7 +293,24 @@ function render() {
          <button onclick="bulkAct('reject')">✕ Reject ${selected.size}</button>` : `<span class="hint">tick designs to act on several at once</span>`}
        </div>`
     : "";
-  document.getElementById("grid").innerHTML = bulkbar + (shown.map(card).join("") ||
+  let cardsHtml;
+  if (tab === "pending") {
+    const groups = new Map();
+    shown.forEach(d => {
+      const k = d.phrase + "|" + d.filters;
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(d);
+    });
+    cardsHtml = [...groups.values()].map(g =>
+      g.length > 1
+        ? `<div class="vargroup"><div class="vg-head">${esc(g[0].phrase)}<span class="vg-style">${esc(g[0].filters)}</span></div>` +
+          `<div class="vg-cards">${g.map(card).join("")}</div></div>`
+        : card(g[0], 0)
+    ).join("");
+  } else {
+    cardsHtml = shown.map(card).join("");
+  }
+  document.getElementById("grid").innerHTML = bulkbar + (cardsHtml ||
     `<div class="empty"><span class="fleuron">❦</span>Nothing here yet — commission some ideas above.</div>`);
 }
 const libState = { q: "", statuses: new Set(), tags: new Set(), minRating: 0, from: "", to: "", sort: "new" };

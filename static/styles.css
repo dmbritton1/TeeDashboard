@@ -259,6 +259,11 @@ select, input[type=date] {
 .card .pick { position: absolute; top: 16px; left: 16px; z-index: 3; width: 17px; height: 17px; accent-color: var(--gold); }
 .card.selected { border-color: var(--gold); }
 
+.vargroup { grid-column: 1 / -1; }
+.vargroup .vg-head { font-family: "Italiana", serif; font-size: 17px; letter-spacing: 0.06em; color: var(--ivory); margin: 8px 0 10px; }
+.vargroup .vg-head .vg-style { font: 11px var(--mono); color: var(--stone); margin-left: 10px; }
+.vargroup .vg-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 18px; }
+
 #toast {
   position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%);
   background: var(--slab); border: 1px solid var(--gold-pale); color: var(--ivory);
