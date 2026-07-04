@@ -40,9 +40,11 @@ filters. 2 variations are generated per line.
 
 ## Local generation (machine with an NVIDIA GPU)
 
-On a computer with an NVIDIA graphics card (12GB+ VRAM recommended), the app
-generates images locally with FLUX.1-schnell instead of calling Gemini - no
-API key, no daily cap, no per-image cost. Setup on that machine:
+On a computer with an NVIDIA graphics card (8GB+ VRAM; 32GB+ system RAM
+recommended on smaller cards), the app generates images locally with
+FLUX.1-schnell instead of calling Gemini - no API key, no daily cap, no
+per-image cost. Cards with 20GB+ VRAM run fast; smaller cards work but take
+a few minutes per image. Setup on that machine:
 
     git clone https://github.com/dmbritton1/TeeDashboard.git
     cd TeeDashboard

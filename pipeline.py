@@ -71,7 +71,12 @@ def generate_image_local(prompt: str) -> bytes:
         pipe = FluxPipeline.from_pretrained(
             "black-forest-labs/FLUX.1-schnell", torch_dtype=torch.bfloat16
         )
-        pipe.enable_model_cpu_offload()  # streams weights through VRAM, fits 24GB cards
+        vram_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
+        if vram_gb >= 20:
+            pipe.enable_model_cpu_offload()  # whole components in VRAM at once: fast
+        else:
+            # streams layer-by-layer: fits ~8GB+ cards, slower per image
+            pipe.enable_sequential_cpu_offload()
         _flux = pipe
     img = _flux(prompt, num_inference_steps=4, guidance_scale=0.0, width=1024, height=1024).images[0]
     buf = io.BytesIO()
