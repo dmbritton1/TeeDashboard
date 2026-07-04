@@ -97,6 +97,29 @@
 
     <section id="view-library" hidden>
       <div class="workhead"><h2>Library</h2><span id="lib_count"></span></div>
+      <section class="panel" id="lib_controls">
+        <div class="row" style="margin-top:0">
+          <input type="text" id="lib_q" placeholder="search phrases and styles…" style="flex:1;min-width:200px">
+          <select id="lib_sort">
+            <option value="new">Newest first</option>
+            <option value="old">Oldest first</option>
+            <option value="rating">Highest rated</option>
+            <option value="az">A to Z</option>
+          </select>
+        </div>
+        <div class="row"><span class="hint" style="min-width:60px">Status</span><span id="lib_status"></span></div>
+        <div class="row"><span class="hint" style="min-width:60px">Tags</span><span id="lib_tags"></span></div>
+        <div class="row">
+          <span class="hint" style="min-width:60px">Rating</span>
+          <select id="lib_minrating">
+            <option value="0">Any</option><option value="1">★+</option><option value="2">★★+</option>
+            <option value="3">★★★+</option><option value="4">★★★★+</option><option value="5">★★★★★</option>
+          </select>
+          <span class="hint">From</span><input type="date" id="lib_from" style="width:150px">
+          <span class="hint">To</span><input type="date" id="lib_to" style="width:150px">
+          <button onclick="libReset()">Clear filters</button>
+        </div>
+      </section>
       <div id="lib_grid"></div>
     </section>
 

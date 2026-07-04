@@ -254,13 +254,95 @@ function render() {
   document.getElementById("grid").innerHTML = shown.map(card).join("") ||
     `<div class="empty"><span class="fleuron">❦</span>Nothing here yet — commission some ideas above.</div>`;
 }
-function renderLibrary() {
-  document.getElementById("lib_count").textContent =
-    designs.length === 1 ? "1 design" : `${designs.length} designs`;
-  document.getElementById("lib_grid").innerHTML =
-    designs.map(card).join("") ||
-    `<div class="empty"><span class="fleuron">❦</span>Nothing here yet.</div>`;
+const libState = { q: "", statuses: new Set(), tags: new Set(), minRating: 0, from: "", to: "", sort: "new" };
+function libReset() {
+  Object.assign(libState, { q: "", minRating: 0, from: "", to: "", sort: "new" });
+  libState.statuses.clear(); libState.tags.clear();
+  document.getElementById("lib_q").value = "";
+  document.getElementById("lib_sort").value = "new";
+  document.getElementById("lib_minrating").value = "0";
+  document.getElementById("lib_from").value = "";
+  document.getElementById("lib_to").value = "";
+  renderLibrary();
 }
+["lib_q", "lib_sort", "lib_minrating", "lib_from", "lib_to"].forEach(id =>
+  document.getElementById(id).addEventListener("input", () => {
+    libState.q = document.getElementById("lib_q").value.trim().toLowerCase();
+    libState.sort = document.getElementById("lib_sort").value;
+    libState.minRating = +document.getElementById("lib_minrating").value;
+    libState.from = document.getElementById("lib_from").value;
+    libState.to = document.getElementById("lib_to").value;
+    renderLibrary();
+  }));
+function toggleSet(set, v) { set.has(v) ? set.delete(v) : set.add(v); renderLibrary(); }
+
+function libFiltered() {
+  let out = designs.filter(d => {
+    if (libState.q && !(d.phrase + " " + d.filters).toLowerCase().includes(libState.q)) return false;
+    const st = d.status === "generating" ? "queued" : d.status;
+    if (libState.statuses.size && !libState.statuses.has(st)) return false;
+    if (libState.tags.size) {
+      const t = tagsOf(d);
+      for (const need of libState.tags) if (!t.includes(need)) return false;
+    }
+    if ((d.rating || 0) < libState.minRating) return false;
+    const day = (d.created_at || "").slice(0, 10);
+    if (libState.from && day < libState.from) return false;
+    if (libState.to && day > libState.to) return false;
+    return true;
+  });
+  const by = {
+    new: (a, b) => b.id - a.id,
+    old: (a, b) => a.id - b.id,
+    rating: (a, b) => (b.rating || 0) - (a.rating || 0) || b.id - a.id,
+    az: (a, b) => a.phrase.localeCompare(b.phrase),
+  }[libState.sort];
+  return out.sort(by);
+}
+
+function stars(d) {
+  let s = "";
+  for (let i = 1; i <= 5; i++)
+    s += `<span class="${i <= (d.rating || 0) ? "lit" : ""}" onclick="setRating(${d.id},${i})">★</span>`;
+  return `<span class="stars" title="click to rate">${s}</span>`;
+}
+async function setRating(id, n) {
+  const d = designs.find(x => x.id === id);
+  const rating = d && d.rating === n ? 0 : n; // click current star again to clear
+  try {
+    await api(`/api/designs/${id}`, {method: "PATCH", headers: {"Content-Type": "application/json"}, body: JSON.stringify({rating})});
+    if (d) d.rating = rating;
+    renderLibrary();
+  } catch (e) { alert(e.message); }
+}
+
+function libCard(d) {
+  const st = d.status === "generating" ? "queued" : d.status;
+  const img = d.file
+    ? `<img src="/${d.file}" loading="lazy" alt="${esc(d.phrase)}" onclick="openLightbox(${d.id})" style="cursor:zoom-in">`
+    : `<div class="placeholder">no image</div>`;
+  return `<div class="card"><div class="frame">${img}</div><div class="body">` +
+    `<div class="phrase">${esc(d.phrase)}</div>` +
+    `<div class="filters">${tagsOf(d).map(t => `<span class="chip" onclick="toggleSet(libState.tags,'${esc(t)}')">${esc(t)}</span>`).join("")}</div>` +
+    `</div><div class="actions" style="justify-content:space-between">` +
+    `${stars(d)}<span class="status-chip">${st}</span></div></div>`;
+}
+
+function renderLibrary() {
+  if (currentView() !== "library") return;
+  const stages = ["pending", "queued", "approved", "published", "failed", "rejected"];
+  document.getElementById("lib_status").innerHTML = stages.map(s =>
+    `<button class="chip ${libState.statuses.has(s) ? "on" : ""}" onclick="toggleSet(libState.statuses,'${s}')">${s}</button>`).join("");
+  const allTags = [...new Set(designs.flatMap(tagsOf))].sort();
+  document.getElementById("lib_tags").innerHTML = allTags.slice(0, 30).map(t =>
+    `<button class="chip ${libState.tags.has(t) ? "on" : ""}" onclick="toggleSet(libState.tags,'${esc(t)}')">${esc(t)}</button>`).join("") ||
+    `<span class="hint">tags appear as you make designs</span>`;
+  const rows = libFiltered();
+  document.getElementById("lib_count").textContent = rows.length === 1 ? "1 design" : `${rows.length} designs`;
+  document.getElementById("lib_grid").innerHTML = rows.map(libCard).join("") ||
+    `<div class="empty"><span class="fleuron">❦</span>No designs match — clear a filter or two.</div>`;
+}
+function openLightbox(id) {} // filled in Task 12
 async function refresh() {
   if (busy) return;
   try {

@@ -224,6 +224,21 @@ label { font-size: 13px; color: var(--stone); min-width: 108px; }
 .chart-title { font-size: 10px; font-weight: 500; letter-spacing: 0.32em; text-transform: uppercase; color: var(--gold-soft); margin-bottom: 12px; }
 .chart-empty { color: var(--stone); font-size: 12.5px; padding: 12px 0; }
 
+select, input[type=date] {
+  background: rgba(12, 10, 8, 0.6); color: var(--ivory);
+  border: 1px solid var(--mist); border-radius: 0; padding: 9px 12px; font: 13px var(--mono);
+}
+.chip {
+  display: inline-block; margin: 0 6px 6px 0; padding: 4px 12px; cursor: pointer;
+  border: 1px solid var(--mist); background: none; color: var(--stone);
+  font: 11px var(--mono); border-radius: 999px; transition: border-color 0.2s, color 0.2s;
+}
+.chip:hover { border-color: var(--gold-pale); color: var(--ivory); }
+.chip.on { border-color: var(--gold); color: var(--gold-leaf); }
+.stars { cursor: pointer; color: var(--vein-grey); font-size: 15px; letter-spacing: 2px; user-select: none; }
+.stars .lit { color: var(--gold-soft); }
+.status-chip { font: 10px var(--mono); color: var(--stone); border: 1px solid var(--mist); padding: 2px 8px; border-radius: 999px; }
+
 #toast {
   position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%);
   background: var(--slab); border: 1px solid var(--gold-pale); color: var(--ivory);
