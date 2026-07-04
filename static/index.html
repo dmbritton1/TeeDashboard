@@ -87,6 +87,11 @@
           <button class="gilt" onclick="generate()">Generate designs</button>
           <span class="hint">2 variations per line · paced ~2/min to stay inside the free tier</span>
         </div>
+        <div class="row">
+          <label for="csv_file" style="min-width:0">Or upload a CSV</label>
+          <input type="file" id="csv_file" accept=".csv,text/csv">
+          <span class="hint" id="csv_state">two columns: phrase, style</span>
+        </div>
       </section>
     </section>
 

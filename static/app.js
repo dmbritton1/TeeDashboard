@@ -113,15 +113,86 @@ async function api(path, opts) {
   }
   return r.json();
 }
-async function generate() {
-  const text = document.getElementById("input").value;
-  if (!text.trim()) return;
-  try {
-    await api("/api/generate", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text})});
-    document.getElementById("input").value = "";
-  } catch (e) { alert(e.message); }
+// minimal CSV: two columns, handles quoted cells with commas/newlines
+function parseCSV(text) {
+  const rows = [];
+  let cell = "", row = [], q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"' && text[i + 1] === '"') { cell += '"'; i++; }
+      else if (c === '"') q = false;
+      else cell += c;
+    } else if (c === '"') q = true;
+    else if (c === ",") { row.push(cell); cell = ""; }
+    else if (c === "\n" || c === "\r") {
+      if (c === "\r" && text[i + 1] === "\n") i++;
+      row.push(cell); cell = "";
+      if (row.some(x => x.trim())) rows.push(row);
+      row = [];
+    } else cell += c;
+  }
+  row.push(cell);
+  if (row.some(x => x.trim())) rows.push(row);
+  if (rows.length && rows[0][0].trim().toLowerCase() === "phrase") rows.shift();
+  return rows
+    .map(r => [(r[0] || "").trim(), (r[1] || "").trim()])
+    .filter(([p]) => p);
+}
+
+function parseLines(text) {
+  return text.split("\n")
+    .map(l => l.split("|").map(s => s.trim()))
+    .map(([p, f]) => [p || "", f || ""])
+    .filter(([p]) => p);
+}
+
+function findDuplicates(items) {
+  const known = new Set(designs.map(d => d.phrase.trim().toLowerCase()));
+  return items.filter(([p]) => known.has(p.trim().toLowerCase()));
+}
+
+async function queueItems(items) {
+  const dups = findDuplicates(items);
+  if (dups.length) {
+    const list = dups.slice(0, 5).map(([p]) => `• ${p}`).join("\n");
+    const skip = confirm(
+      `${dups.length} of these look like designs you already have:\n${list}` +
+      (dups.length > 5 ? "\n…" : "") +
+      `\n\nOK = skip the duplicates, Cancel = queue everything anyway`);
+    if (skip) {
+      const dupSet = new Set(dups.map(([p]) => p.trim().toLowerCase()));
+      items = items.filter(([p]) => !dupSet.has(p.trim().toLowerCase()));
+    }
+  }
+  if (!items.length) { flash("Nothing new to queue"); return; }
+  const text = items.map(([p, f]) => f ? `${p} | ${f}` : p).join("\n");
+  await api("/api/generate", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text})});
+  flash(`Queued ${items.length} idea${items.length === 1 ? "" : "s"} (2 variations each)`);
   refresh();
 }
+
+async function generate() {
+  const items = parseLines(document.getElementById("input").value);
+  if (!items.length) return;
+  try {
+    await queueItems(items);
+    document.getElementById("input").value = "";
+  } catch (e) { alert(e.message); }
+}
+
+document.getElementById("csv_file").addEventListener("change", async (ev) => {
+  const file = ev.target.files[0];
+  if (!file) return;
+  const state = document.getElementById("csv_state");
+  try {
+    const items = parseCSV(await file.text());
+    if (!items.length) { state.textContent = "No ideas found in that file"; return; }
+    state.textContent = `${items.length} ideas found`;
+    await queueItems(items);
+  } catch (e) { state.textContent = "Couldn't read that file: " + e.message; }
+  ev.target.value = "";
+});
 async function saveSettings() {
   const body = {
     gemini_api_key: document.getElementById("gemini_key").value,
