@@ -206,6 +206,41 @@ async function refresh() {
     render();
   } catch (e) { document.getElementById("status_text").textContent = "server unreachable"; }
 }
+let toastTimer;
+function flash(msg, actionLabel, action) {
+  const t = document.getElementById("toast");
+  t.innerHTML = esc(msg) + (actionLabel ? ` <button onclick="toastAction()">${esc(actionLabel)}</button>` : "");
+  window.toastAction = action || null;
+  t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.hidden = true; }, 5000);
+}
+
+let promptSaveTimer, promptLoaded = false;
+async function loadPrompt() {
+  try {
+    const s = await api("/api/settings");
+    document.getElementById("prompt_box").value = s.prompt_template;
+    promptLoaded = true;
+  } catch (e) {}
+}
+document.getElementById("prompt_box").addEventListener("input", () => {
+  if (!promptLoaded) return;
+  clearTimeout(promptSaveTimer);
+  promptSaveTimer = setTimeout(async () => {
+    try {
+      await api("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({prompt_template: document.getElementById("prompt_box").value})});
+    } catch (e) { flash("Couldn't save the prompt — " + e.message); }
+  }, 600);
+});
+async function copyPrompt() {
+  const el = document.getElementById("prompt_box");
+  try { await navigator.clipboard.writeText(el.value); flash("Prompt copied"); }
+  catch (e) { el.focus(); el.select(); flash("Press ⌘C to copy"); }
+}
+loadPrompt();
+
 showView();
 refresh();
 setInterval(refresh, 3000);
