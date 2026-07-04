@@ -36,7 +36,62 @@ function renderDashboard() {
     `<div class="num">${c.n}</div><div class="lbl">${c.label}</div></button>`).join("");
   renderCharts();
 }
-function renderCharts() {} // filled in Task 8
+function isoWeek(dateStr) {
+  const d = new Date(dateStr + "Z");
+  const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+  const week = Math.ceil(((t - yearStart) / 86400000 + 1) / 7);
+  return `${t.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+
+function renderCharts() {
+  // quality: approved (incl published) vs rejected per week, last 8 weeks with data
+  const weeks = {};
+  designs.forEach(d => {
+    const ok = d.status === "approved" || d.status === "published";
+    const bad = d.status === "rejected";
+    if (!ok && !bad) return;
+    const w = isoWeek(d.reviewed_at || d.created_at);
+    weeks[w] = weeks[w] || { ok: 0, bad: 0 };
+    weeks[w][ok ? "ok" : "bad"]++;
+  });
+  const keys = Object.keys(weeks).sort().slice(-8);
+  const qEl = document.getElementById("chart_quality");
+  qEl.innerHTML = `<div class="chart-title">Approval rate by week</div>` + (keys.length
+    ? keys.map(w => {
+        const { ok, bad } = weeks[w];
+        const pct = Math.round(100 * ok / (ok + bad));
+        return `<div style="display:flex;align-items:center;gap:10px;margin:7px 0;font:11px var(--mono);color:var(--stone)">` +
+          `<span style="width:70px">${w.slice(5)}</span>` +
+          `<svg width="100%" height="10" style="flex:1"><rect width="${pct}%" height="10" fill="var(--gold)"/>` +
+          `<rect x="${pct}%" width="${100 - pct}%" height="10" fill="var(--mist)"/></svg>` +
+          `<span style="width:78px;text-align:right">${pct}% of ${ok + bad}</span></div>`;
+      }).join("")
+    : `<div class="chart-empty">No reviewed designs yet — approve or reject a few and this fills in.</div>`);
+
+  // styles: top 8 tags by count, with approval share
+  const tags = {};
+  designs.forEach(d => tagsOf(d).forEach(t => {
+    tags[t] = tags[t] || { n: 0, ok: 0, judged: 0 };
+    tags[t].n++;
+    if (["approved", "published", "rejected"].includes(d.status)) {
+      tags[t].judged++;
+      if (d.status !== "rejected") tags[t].ok++;
+    }
+  }));
+  const top = Object.entries(tags).sort((a, b) => b[1].n - a[1].n).slice(0, 8);
+  const max = top.length ? top[0][1].n : 1;
+  const sEl = document.getElementById("chart_styles");
+  sEl.innerHTML = `<div class="chart-title">Top styles</div>` + (top.length
+    ? top.map(([t, v]) =>
+        `<div style="display:flex;align-items:center;gap:10px;margin:7px 0;font:11px var(--mono);color:var(--stone)">` +
+        `<span style="width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(t)}">${esc(t)}</span>` +
+        `<svg width="100%" height="10" style="flex:1"><rect width="${Math.round(100 * v.n / max)}%" height="10" fill="var(--gold-soft)"/></svg>` +
+        `<span style="width:110px;text-align:right">${v.n}${v.judged ? ` · ${Math.round(100 * v.ok / v.judged)}% kept` : ""}</span></div>`)
+      .join("")
+    : `<div class="chart-empty">Tags appear once you have designs.</div>`);
+}
 
 const STAGES = [
   { id: "pending",   name: "To review" },
