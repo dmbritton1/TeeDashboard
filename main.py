@@ -24,6 +24,7 @@ worker.start()
 
 app = FastAPI(title="T-Shirt Design Pipeline")
 app.mount("/designs", StaticFiles(directory=os.path.join(BASE, "designs")), name="designs")
+app.mount("/static", StaticFiles(directory=os.path.join(BASE, "static")), name="static")
 
 
 @app.get("/")
