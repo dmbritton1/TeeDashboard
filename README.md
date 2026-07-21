@@ -75,3 +75,27 @@ walk away, come back to review. The status bar shows today's usage.
 ## Tests
 
     .venv/bin/pytest -q
+
+## Share with a few people (any device)
+
+The dashboard runs on this machine; a tunnel gives it a public link so others
+can open it in a browser and queue images. Generation still happens locally.
+
+1. Set an **Access code** in the dashboard settings (gates image generation; a
+   leaked link alone can't queue work). Without a code the link is open.
+2. Run the server bound to all interfaces:
+
+       .venv\Scripts\uvicorn main:app --host 0.0.0.0 --port 8000
+
+3. In another terminal, start a Cloudflare Quick Tunnel (install `cloudflared`
+   first from Cloudflare's site):
+
+       cloudflared tunnel --url http://localhost:8000
+
+   It prints a `https://<random>.trycloudflare.com` URL. Share it. Anyone who
+   opens it gets the dashboard and, on first generate, is asked for the access
+   code.
+
+Notes: the tunnel URL changes each time you restart `cloudflared`. Generation is
+serialized on one GPU, so images queue (~a few minutes each); the queue is capped
+at 30 in-flight to prevent flooding.
