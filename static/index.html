@@ -47,6 +47,12 @@
       <label>Shop ID</label>
       <input type="text" id="printify_shop" placeholder="shop id" style="width:120px">
     </div>
+    <div class="row">
+      <label>Access code</label>
+      <input type="password" id="access_code" placeholder="set a code to gate the shared link">
+      <button onclick="forgetCode()">Forget code on this device</button>
+      <span class="hint" id="code_state"></span>
+    </div>
   </section>
   <section class="panel" id="pipelinePanel">
     <textarea id="input" placeholder="funny fishing shirt | vintage, distressed, black shirt&#10;plant mom | retro 70s, floral"></textarea>
@@ -71,7 +77,18 @@ let tab = "pending", designs = [];
 let stat = {}, busy = 0;
 
 async function api(path, opts) {
-  const r = await fetch(path, opts);
+  opts = opts || {};
+  const code = localStorage.getItem("accessCode");
+  if (code) opts.headers = Object.assign({}, opts.headers, {"X-Access-Code": code});
+  let r = await fetch(path, opts);
+  if (r.status === 401) {
+    const entered = prompt("Enter the access code:");
+    if (entered) {
+      localStorage.setItem("accessCode", entered);
+      opts.headers = Object.assign({}, opts.headers, {"X-Access-Code": entered});
+      r = await fetch(path, opts);
+    }
+  }
   if (!r.ok) {
     let detail = r.statusText;
     try { detail = (await r.json()).detail || detail; } catch (e) {}
@@ -108,12 +125,18 @@ async function saveSettings() {
     gemini_api_key: document.getElementById("gemini_key").value,
     printify_api_token: document.getElementById("printify_token").value,
     printify_shop_id: document.getElementById("printify_shop").value,
+    access_code: document.getElementById("access_code").value,
   };
   try { await api("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)}); }
   catch (e) { alert(e.message); }
   document.getElementById("gemini_key").value = "";
   document.getElementById("printify_token").value = "";
+  document.getElementById("access_code").value = "";
   refresh();
+}
+function forgetCode() {
+  localStorage.removeItem("accessCode");
+  alert("Access code cleared on this device.");
 }
 async function act(btn, id, action) {
   btn.disabled = true;
@@ -185,6 +208,7 @@ async function refresh() {
         (status.has_key ? "" : " · ⚠ no API key") +
         (status.paused ? " · daily cap reached — resumes tomorrow" : "");
     document.getElementById("key_state").textContent = status.has_key ? "key saved ✓" : "no key saved";
+    document.getElementById("code_state").textContent = status.access_code ? "code set ✓" : "no code — link is open";
     render();
   } catch (e) { document.getElementById("statusbar").textContent = "server unreachable"; }
 }
