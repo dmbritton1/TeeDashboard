@@ -91,3 +91,34 @@ def test_queue_cap_allows_below_limit():
         con.execute("INSERT INTO designs (phrase, filters, status) VALUES ('x','','queued')")
     r = client.post("/api/test", json={"text": "still room"})
     assert r.status_code == 200, r.text
+
+
+def test_all_mutating_design_actions_gated_when_code_set():
+    _reset()
+    db.set_setting("access_code", "hunter2")
+    with db.connect() as con:
+        con.execute("INSERT INTO designs (phrase, filters, status) VALUES ('x','','pending')")
+        did = con.execute("SELECT id FROM designs").fetchone()["id"]
+    for action in ["approve", "reject", "retry", "regenerate", "publish", "delete"]:
+        r = client.post(f"/api/designs/{did}/{action}")
+        assert r.status_code == 401, f"{action} not gated (got {r.status_code})"
+
+
+def test_regenerate_respects_queue_cap():
+    _reset()
+    with db.connect() as con:
+        for _ in range(worker.MAX_QUEUE):
+            con.execute("INSERT INTO designs (phrase, filters, status) VALUES ('x','','queued')")
+        con.execute("INSERT INTO designs (phrase, filters, status) VALUES ('src','','pending')")
+        did = con.execute("SELECT id FROM designs WHERE status='pending'").fetchone()["id"]
+    r = client.post(f"/api/designs/{did}/regenerate")
+    assert r.status_code == 429
+
+
+def test_queue_cap_rejects_generate_when_full():
+    _reset()
+    with db.connect() as con:
+        for _ in range(worker.MAX_QUEUE):
+            con.execute("INSERT INTO designs (phrase, filters, status) VALUES ('x','','queued')")
+    r = client.post("/api/generate", json={"text": "funny shirt"})
+    assert r.status_code == 429

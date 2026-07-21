@@ -96,7 +96,7 @@ def generate_test(body: TestBody, _gate: None = Depends(require_access_code)):
 
 
 @app.post("/api/designs/{design_id}/delete")
-def delete_design(design_id: int):
+def delete_design(design_id: int, _gate: None = Depends(require_access_code)):
     with db.connect() as con:
         row = con.execute(
             "SELECT file, print_file FROM designs WHERE id = ?", (design_id,)
@@ -132,7 +132,7 @@ def _set_status(design_id: int, to: str, allowed: tuple[str, ...]) -> None:
 
 
 @app.post("/api/designs/{design_id}/approve")
-def approve(design_id: int):
+def approve(design_id: int, _gate: None = Depends(require_access_code)):
     _set_status(design_id, "approved", ("pending",))
     with db.connect() as con:
         row = con.execute("SELECT file FROM designs WHERE id = ?", (design_id,)).fetchone()
@@ -142,25 +142,29 @@ def approve(design_id: int):
 
 
 @app.post("/api/designs/{design_id}/reject")
-def reject(design_id: int):
+def reject(design_id: int, _gate: None = Depends(require_access_code)):
     _set_status(design_id, "rejected", ("pending",))
     return {"ok": True}
 
 
 @app.post("/api/designs/{design_id}/retry")
-def retry(design_id: int):
+def retry(design_id: int, _gate: None = Depends(require_access_code)):
+    if _queue_full():
+        raise HTTPException(429, "Queue is full - try again shortly")
     _set_status(design_id, "queued", ("failed", "rejected"))
     return {"ok": True}
 
 
 @app.post("/api/designs/{design_id}/regenerate")
-def regenerate(design_id: int):
+def regenerate(design_id: int, _gate: None = Depends(require_access_code)):
     with db.connect() as con:
         row = con.execute(
             "SELECT phrase, filters FROM designs WHERE id = ?", (design_id,)
         ).fetchone()
         if not row:
             raise HTTPException(404, "Design not found")
+        if _queue_full():
+            raise HTTPException(429, "Queue is full - try again shortly")
         con.execute(
             "INSERT INTO designs (phrase, filters, status) VALUES (?, ?, 'queued')",
             (row["phrase"], row["filters"]),
@@ -169,7 +173,7 @@ def regenerate(design_id: int):
 
 
 @app.post("/api/designs/{design_id}/publish")
-def publish(design_id: int):
+def publish(design_id: int, _gate: None = Depends(require_access_code)):
     if not (db.get_setting("printify_api_token") and db.get_setting("printify_shop_id")):
         raise HTTPException(400, "Printify not configured - add your token and shop ID in settings")
     with db.connect() as con:
