@@ -1,6 +1,8 @@
-# Extras for generating images on a local NVIDIA GPU (see README "Local generation")
+# Extras for generating images on a local GPU (see README "Local generation")
 diffusers
-transformers
+# 5.x hard-imports torch.distributed, which AMD's Windows ROCm build ships without
+transformers<5
 accelerate
 sentencepiece
 protobuf
+gguf  # 4-bit transformer on AMD cards
