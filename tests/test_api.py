@@ -53,3 +53,21 @@ def test_reading_designs_never_gated():
     db.set_setting("access_code", "hunter2")
     assert client.get("/api/designs").status_code == 200
     assert client.get("/api/status").status_code == 200
+
+
+def test_settings_open_when_no_code_set():
+    _reset()
+    r = client.post("/api/settings", json={"access_code": "hunter2"})
+    assert r.status_code == 200, r.text
+    assert client.get("/api/status").json()["access_code"] is True
+
+
+def test_settings_gated_once_code_set():
+    _reset()
+    db.set_setting("access_code", "hunter2")
+    # no header -> cannot overwrite the code
+    assert client.post("/api/settings", json={"access_code": "attacker"}).status_code == 401
+    # correct header -> owner can still change settings
+    r = client.post("/api/settings", json={"gemini_api_key": "k"},
+                    headers={"X-Access-Code": "hunter2"})
+    assert r.status_code == 200, r.text

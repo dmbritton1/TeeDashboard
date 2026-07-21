@@ -55,7 +55,7 @@ class SettingsBody(BaseModel):
 
 
 @app.post("/api/generate")
-def generate(body: GenerateBody, _: None = Depends(require_access_code)):
+def generate(body: GenerateBody, _gate: None = Depends(require_access_code)):
     items = pipeline.parse_input(body.text)
     if not items:
         raise HTTPException(400, "No valid lines found")
@@ -70,7 +70,7 @@ def generate(body: GenerateBody, _: None = Depends(require_access_code)):
 
 
 @app.post("/api/test")
-def generate_test(body: TestBody, _: None = Depends(require_access_code)):
+def generate_test(body: TestBody, _gate: None = Depends(require_access_code)):
     """Queue one scratch image from the raw prompt - bypasses the t-shirt template and pipeline."""
     text = body.text.strip()
     if not text:
@@ -194,7 +194,7 @@ def get_settings():
 
 
 @app.post("/api/settings")
-def save_settings(body: SettingsBody):
+def save_settings(body: SettingsBody, _gate: None = Depends(require_access_code)):
     for k, v in body.model_dump().items():
         if v.strip():
             db.set_setting(k, v.strip())
