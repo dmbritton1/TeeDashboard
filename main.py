@@ -2,7 +2,7 @@
 import os
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -31,6 +31,13 @@ def index():
     return FileResponse(os.path.join(BASE, "static", "index.html"))
 
 
+def require_access_code(x_access_code: str | None = Header(default=None)) -> None:
+    """Gate generation once a shared code is set; open when no code exists."""
+    code = db.get_setting("access_code")
+    if code and x_access_code != code:
+        raise HTTPException(401, "Access code required")
+
+
 class GenerateBody(BaseModel):
     text: str
     variations: int = 2
@@ -44,10 +51,11 @@ class SettingsBody(BaseModel):
     gemini_api_key: str = ""
     printify_api_token: str = ""
     printify_shop_id: str = ""
+    access_code: str = ""
 
 
 @app.post("/api/generate")
-def generate(body: GenerateBody):
+def generate(body: GenerateBody, _: None = Depends(require_access_code)):
     items = pipeline.parse_input(body.text)
     if not items:
         raise HTTPException(400, "No valid lines found")
@@ -62,7 +70,7 @@ def generate(body: GenerateBody):
 
 
 @app.post("/api/test")
-def generate_test(body: TestBody):
+def generate_test(body: TestBody, _: None = Depends(require_access_code)):
     """Queue one scratch image from the raw prompt - bypasses the t-shirt template and pipeline."""
     text = body.text.strip()
     if not text:
@@ -210,4 +218,5 @@ def status():
         "printify_ready": bool(
             db.get_setting("printify_api_token") and db.get_setting("printify_shop_id")
         ),
+        "access_code": bool(db.get_setting("access_code")),
     }
