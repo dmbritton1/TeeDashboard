@@ -38,6 +38,14 @@ def require_access_code(x_access_code: str | None = Header(default=None)) -> Non
         raise HTTPException(401, "Access code required")
 
 
+def _queue_full() -> bool:
+    with db.connect() as con:
+        n = con.execute(
+            "SELECT COUNT(*) AS c FROM designs WHERE status IN ('queued', 'generating')"
+        ).fetchone()["c"]
+    return n >= worker.MAX_QUEUE
+
+
 class GenerateBody(BaseModel):
     text: str
     variations: int = 2
@@ -59,6 +67,8 @@ def generate(body: GenerateBody, _gate: None = Depends(require_access_code)):
     items = pipeline.parse_input(body.text)
     if not items:
         raise HTTPException(400, "No valid lines found")
+    if _queue_full():
+        raise HTTPException(429, "Queue is full - try again shortly")
     with db.connect() as con:
         for phrase, filters in items:
             for _ in range(body.variations):
@@ -75,6 +85,8 @@ def generate_test(body: TestBody, _gate: None = Depends(require_access_code)):
     text = body.text.strip()
     if not text:
         raise HTTPException(400, "Enter a prompt")
+    if _queue_full():
+        raise HTTPException(429, "Queue is full - try again shortly")
     with db.connect() as con:
         cur = con.execute(
             "INSERT INTO designs (phrase, filters, status, test) VALUES (?, '', 'queued', 1)",

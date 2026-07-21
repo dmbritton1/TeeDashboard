@@ -7,6 +7,7 @@ import db
 import pipeline
 
 DAILY_CAP = 450        # stop 50 short of the ~500/day free-tier cap
+MAX_QUEUE = 30         # bound in-flight images so a shared link can't flood the GPU
 SECONDS_BETWEEN = 31   # ~2 images/min free-tier pace
 DESIGNS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "designs")
 

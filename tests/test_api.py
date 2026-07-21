@@ -71,3 +71,23 @@ def test_settings_gated_once_code_set():
     r = client.post("/api/settings", json={"gemini_api_key": "k"},
                     headers={"X-Access-Code": "hunter2"})
     assert r.status_code == 200, r.text
+
+
+import worker  # noqa: E402
+
+
+def test_queue_cap_rejects_when_full():
+    _reset()
+    with db.connect() as con:
+        for _ in range(worker.MAX_QUEUE):
+            con.execute("INSERT INTO designs (phrase, filters, status) VALUES ('x','','queued')")
+    r = client.post("/api/test", json={"text": "one too many"})
+    assert r.status_code == 429
+
+
+def test_queue_cap_allows_below_limit():
+    _reset()
+    with db.connect() as con:
+        con.execute("INSERT INTO designs (phrase, filters, status) VALUES ('x','','queued')")
+    r = client.post("/api/test", json={"text": "still room"})
+    assert r.status_code == 200, r.text
