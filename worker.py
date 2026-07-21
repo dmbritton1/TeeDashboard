@@ -19,13 +19,15 @@ def process_next() -> bool:
         return False
     with db.connect() as con:
         row = con.execute(
-            "SELECT * FROM designs WHERE status = 'queued' ORDER BY id LIMIT 1"
+            # test images jump ahead so a scratch prompt isn't stuck behind a big batch
+            "SELECT * FROM designs WHERE status = 'queued' ORDER BY test DESC, id LIMIT 1"
         ).fetchone()
         if not row:
             return False
         con.execute("UPDATE designs SET status = 'generating' WHERE id = ?", (row["id"],))
     try:
-        prompt = pipeline.build_prompt(row["phrase"], row["filters"])
+        # Test tab sends its text raw; the pipeline wraps its phrase in the t-shirt template
+        prompt = row["phrase"] if row["test"] else pipeline.build_prompt(row["phrase"], row["filters"])
         png = pipeline.generate_image_local(prompt) if local else pipeline.generate_image(prompt, key)
         os.makedirs(DESIGNS_DIR, exist_ok=True)
         with open(os.path.join(DESIGNS_DIR, "%d.png" % row["id"]), "wb") as f:

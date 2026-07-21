@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS designs (
     print_file TEXT,
     status TEXT NOT NULL DEFAULT 'queued',
     error TEXT,
+    test INTEGER NOT NULL DEFAULT 0,  -- 1 = scratch image from the Test tab, skips the pipeline
     created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
@@ -31,6 +32,10 @@ def connect() -> sqlite3.Connection:
 def init() -> None:
     with connect() as con:
         con.executescript(SCHEMA)
+        # migrate DBs created before the Test tab existed
+        cols = {r["name"] for r in con.execute("PRAGMA table_info(designs)")}
+        if "test" not in cols:
+            con.execute("ALTER TABLE designs ADD COLUMN test INTEGER NOT NULL DEFAULT 0")
 
 
 def get_setting(key: str, default=None):

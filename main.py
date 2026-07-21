@@ -36,6 +36,10 @@ class GenerateBody(BaseModel):
     variations: int = 2
 
 
+class TestBody(BaseModel):
+    text: str
+
+
 class SettingsBody(BaseModel):
     gemini_api_key: str = ""
     printify_api_token: str = ""
@@ -55,6 +59,38 @@ def generate(body: GenerateBody):
                     (phrase, filters),
                 )
     return {"queued": len(items) * body.variations}
+
+
+@app.post("/api/test")
+def generate_test(body: TestBody):
+    """Queue one scratch image from the raw prompt - bypasses the t-shirt template and pipeline."""
+    text = body.text.strip()
+    if not text:
+        raise HTTPException(400, "Enter a prompt")
+    with db.connect() as con:
+        cur = con.execute(
+            "INSERT INTO designs (phrase, filters, status, test) VALUES (?, '', 'queued', 1)",
+            (text,),
+        )
+    return {"id": cur.lastrowid}
+
+
+@app.post("/api/designs/{design_id}/delete")
+def delete_design(design_id: int):
+    with db.connect() as con:
+        row = con.execute(
+            "SELECT file, print_file FROM designs WHERE id = ?", (design_id,)
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "Design not found")
+        con.execute("DELETE FROM designs WHERE id = ?", (design_id,))
+    for col in ("file", "print_file"):
+        if row[col]:
+            try:
+                os.remove(os.path.join(BASE, row[col]))
+            except OSError:
+                pass  # best-effort; a missing file is fine
+    return {"ok": True}
 
 
 @app.get("/api/designs")

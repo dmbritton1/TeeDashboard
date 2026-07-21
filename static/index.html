@@ -48,18 +48,25 @@
       <input type="text" id="printify_shop" placeholder="shop id" style="width:120px">
     </div>
   </section>
-  <section class="panel">
+  <section class="panel" id="pipelinePanel">
     <textarea id="input" placeholder="funny fishing shirt | vintage, distressed, black shirt&#10;plant mom | retro 70s, floral"></textarea>
     <div class="row" style="margin-top:8px">
       <button class="primary" onclick="generate()">Generate designs</button>
       <span class="hint">2 variations per line · paced ~2/min to stay inside the free tier</span>
     </div>
   </section>
+  <section class="panel" id="testPanel" style="display:none">
+    <textarea id="testInput" placeholder="Type any prompt, sent to the model exactly as written.&#10;e.g. a red dragon coiled around a sword, vintage tattoo style"></textarea>
+    <div class="row" style="margin-top:8px">
+      <button class="primary" onclick="generateTest()">Generate image</button>
+      <span class="hint" id="testHint">raw prompt · no template · jumps the queue</span>
+    </div>
+  </section>
   <div class="tabs" id="tabs"></div>
   <div id="grid"></div>
 </main>
 <script>
-const TABS = ["pending", "queued", "approved", "published", "failed", "rejected"];
+const TABS = ["pending", "queued", "approved", "published", "failed", "rejected", "test"];
 let tab = "pending", designs = [];
 let stat = {}, busy = 0;
 
@@ -80,6 +87,21 @@ async function generate() {
     document.getElementById("input").value = "";
   } catch (e) { alert(e.message); }
   refresh();
+}
+async function generateTest() {
+  const el = document.getElementById("testInput");
+  const text = el.value.trim();
+  if (!text) return;
+  try {
+    await api("/api/test", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text})});
+    // keep the text so you can tweak and re-run
+    document.getElementById("testHint").textContent = "queued ✓ · generating takes a few minutes on this GPU";
+  } catch (e) { alert(e.message); }
+  refresh();
+}
+function reuse(id) {
+  const d = designs.find(x => x.id === id);
+  if (d) { document.getElementById("testInput").value = d.phrase; document.getElementById("testInput").focus(); }
 }
 async function saveSettings() {
   const body = {
@@ -106,6 +128,18 @@ function esc(s) {
 }
 function card(d) {
   const generating = d.status === "queued" || d.status === "generating";
+  if (d.test) {
+    const timg = d.file
+      ? `<img src="/${d.file}" loading="lazy">`
+      : `<div class="placeholder">${generating ? "generating… (a few min on this GPU)" : (d.error ? "failed" : "no image")}</div>`;
+    return `<div class="card">${timg}<div class="body">` +
+      `<div class="filters" style="white-space:pre-wrap">${esc(d.phrase)}</div>` +
+      (d.error ? `<div class="error">${esc(d.error)}</div>` : "") +
+      `</div><div class="actions">` +
+      `<button onclick="reuse(${d.id})">↻ Reuse</button>` +
+      `<button onclick="act(this,${d.id},'delete')">🗑 Delete</button>` +
+      `</div></div>`;
+  }
   const img = d.file
     ? `<img src="/${d.file}" loading="lazy">`
     : `<div class="placeholder">${generating ? "generating…" : "no image"}</div>`;
@@ -126,13 +160,18 @@ function card(d) {
 function render() {
   const counts = {};
   designs.forEach(d => {
-    const t = d.status === "generating" ? "queued" : d.status;
+    const t = d.test ? "test" : (d.status === "generating" ? "queued" : d.status);
     counts[t] = (counts[t] || 0) + 1;
   });
   document.getElementById("tabs").innerHTML = TABS.map(t =>
     `<button class="${t === tab ? "active" : ""}" onclick="tab='${t}';render()">${t} (${counts[t] || 0})</button>`).join("");
-  const shown = designs.filter(d => d.status === tab || (tab === "queued" && d.status === "generating"));
+  // test images live only in the Test tab; the pipeline tabs never show them
+  const shown = tab === "test"
+    ? designs.filter(d => d.test)
+    : designs.filter(d => !d.test && (d.status === tab || (tab === "queued" && d.status === "generating")));
   document.getElementById("grid").innerHTML = shown.map(card).join("") || '<p class="hint">nothing here</p>';
+  document.getElementById("testPanel").style.display = tab === "test" ? "" : "none";
+  document.getElementById("pipelinePanel").style.display = tab === "test" ? "none" : "";
 }
 async function refresh() {
   if (busy) return;
