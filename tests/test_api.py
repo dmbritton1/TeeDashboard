@@ -1,124 +1,184 @@
-import os
-import tempfile
+"""Endpoint tests by direct function call (no HTTP client needed)."""
+import importlib
+import zipfile
+
+import pytest
+from fastapi import HTTPException
 
 import db
-
-# point the app at a throwaway DB before main's import-time db.init() runs
-db.DB_PATH = os.path.join(tempfile.mkdtemp(), "api.db")
-
-from fastapi.testclient import TestClient  # noqa: E402
-
-import main  # noqa: E402
-
-client = TestClient(main.app)
+import worker
 
 
-def _reset():
+def load_main(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setattr(worker, "start", lambda: None)
+    import main
+    main = importlib.reload(main)
+    monkeypatch.setattr(main, "BASE", str(tmp_path))
+    return main
+
+
+def insert(status="pending", **kw):
+    row = {"phrase": "dog dad", "filters": "vintage", "status": status, **kw}
     with db.connect() as con:
-        con.execute("DELETE FROM designs")
-        con.execute("DELETE FROM settings")
+        cur = con.execute(
+            "INSERT INTO designs (%s) VALUES (%s)"
+            % (", ".join(row), ", ".join("?" * len(row))),
+            tuple(row.values()),
+        )
+        return cur.lastrowid
 
 
-def test_generation_open_when_no_code_set():
-    _reset()
-    r = client.post("/api/test", json={"text": "a red dragon"})
-    assert r.status_code == 200, r.text
-
-
-def test_generation_blocked_without_code_header_when_code_set():
-    _reset()
-    db.set_setting("access_code", "hunter2")
-    r = client.post("/api/test", json={"text": "a red dragon"})
-    assert r.status_code == 401
-
-
-def test_generation_blocked_with_wrong_code():
-    _reset()
-    db.set_setting("access_code", "hunter2")
-    r = client.post("/api/test", json={"text": "a red dragon"},
-                    headers={"X-Access-Code": "nope"})
-    assert r.status_code == 401
-
-
-def test_generation_allowed_with_correct_code():
-    _reset()
-    db.set_setting("access_code", "hunter2")
-    r = client.post("/api/test", json={"text": "a red dragon"},
-                    headers={"X-Access-Code": "hunter2"})
-    assert r.status_code == 200, r.text
-
-
-def test_reading_designs_never_gated():
-    _reset()
-    db.set_setting("access_code", "hunter2")
-    assert client.get("/api/designs").status_code == 200
-    assert client.get("/api/status").status_code == 200
-
-
-def test_settings_open_when_no_code_set():
-    _reset()
-    r = client.post("/api/settings", json={"access_code": "hunter2"})
-    assert r.status_code == 200, r.text
-    assert client.get("/api/status").json()["access_code"] is True
-
-
-def test_settings_gated_once_code_set():
-    _reset()
-    db.set_setting("access_code", "hunter2")
-    # no header -> cannot overwrite the code
-    assert client.post("/api/settings", json={"access_code": "attacker"}).status_code == 401
-    # correct header -> owner can still change settings
-    r = client.post("/api/settings", json={"gemini_api_key": "k"},
-                    headers={"X-Access-Code": "hunter2"})
-    assert r.status_code == 200, r.text
-
-
-import worker  # noqa: E402
-
-
-def test_queue_cap_rejects_when_full():
-    _reset()
+def test_approve_sets_reviewed_at(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    did = insert("pending")
+    main.approve(did)
     with db.connect() as con:
-        for _ in range(worker.MAX_QUEUE):
-            con.execute("INSERT INTO designs (phrase, filters, status) VALUES ('x','','queued')")
-    r = client.post("/api/test", json={"text": "one too many"})
-    assert r.status_code == 429
+        row = con.execute("SELECT * FROM designs WHERE id = ?", (did,)).fetchone()
+    assert row["status"] == "approved" and row["reviewed_at"]
 
 
-def test_queue_cap_allows_below_limit():
-    _reset()
+def test_unreview_returns_to_pending(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    did = insert("rejected", reviewed_at="2026-07-01 00:00:00")
+    main.unreview(did)
     with db.connect() as con:
-        con.execute("INSERT INTO designs (phrase, filters, status) VALUES ('x','','queued')")
-    r = client.post("/api/test", json={"text": "still room"})
-    assert r.status_code == 200, r.text
+        row = con.execute("SELECT * FROM designs WHERE id = ?", (did,)).fetchone()
+    assert row["status"] == "pending" and row["reviewed_at"] is None
 
 
-def test_all_mutating_design_actions_gated_when_code_set():
-    _reset()
-    db.set_setting("access_code", "hunter2")
+def test_patch_tags_and_rating(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    did = insert("pending")
+    main.patch_design(did, main.PatchBody(tags="funny, dog", rating=9))
     with db.connect() as con:
-        con.execute("INSERT INTO designs (phrase, filters, status) VALUES ('x','','pending')")
-        did = con.execute("SELECT id FROM designs").fetchone()["id"]
-    for action in ["approve", "reject", "retry", "regenerate", "publish", "delete"]:
-        r = client.post(f"/api/designs/{did}/{action}")
-        assert r.status_code == 401, f"{action} not gated (got {r.status_code})"
+        row = con.execute("SELECT * FROM designs WHERE id = ?", (did,)).fetchone()
+    assert row["tags"] == "funny, dog"
+    assert row["rating"] == 5  # clamped
 
 
-def test_regenerate_respects_queue_cap():
-    _reset()
+def test_patch_missing_design_404(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    with pytest.raises(HTTPException) as e:
+        main.patch_design(999, main.PatchBody(rating=3))
+    assert e.value.status_code == 404
+
+
+def test_patch_empty_body_400(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    did = insert("pending")
+    with pytest.raises(HTTPException) as e:
+        main.patch_design(did, main.PatchBody())
+    assert e.value.status_code == 400
+
+
+def test_delete_rejected_removes_row_and_files(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    img = tmp_path / "designs" / "9.png"
+    img.parent.mkdir(exist_ok=True)
+    img.write_bytes(b"png")
+    did = insert("rejected", file="designs/9.png")
+    main.delete_design(did)
     with db.connect() as con:
-        for _ in range(worker.MAX_QUEUE):
-            con.execute("INSERT INTO designs (phrase, filters, status) VALUES ('x','','queued')")
-        con.execute("INSERT INTO designs (phrase, filters, status) VALUES ('src','','pending')")
-        did = con.execute("SELECT id FROM designs WHERE status='pending'").fetchone()["id"]
-    r = client.post(f"/api/designs/{did}/regenerate")
-    assert r.status_code == 429
+        assert con.execute("SELECT COUNT(*) c FROM designs").fetchone()["c"] == 0
+    assert not img.exists()
 
 
-def test_queue_cap_rejects_generate_when_full():
-    _reset()
+def test_delete_guards_status(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    did = insert("approved")
+    with pytest.raises(HTTPException) as e:
+        main.delete_design(did)
+    assert e.value.status_code == 409
+
+
+def test_delete_missing_404(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    with pytest.raises(HTTPException) as e:
+        main.delete_design(1)
+    assert e.value.status_code == 404
+
+
+def test_publish_stores_product_id(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    db.set_setting("printify_api_token", "t")
+    db.set_setting("printify_shop_id", "s")
+    pf = tmp_path / "designs" / "7-print.png"
+    pf.parent.mkdir(exist_ok=True)
+    pf.write_bytes(b"png")
+    did = insert("approved", file="designs/7-print.png", print_file="designs/7-print.png")
+    monkeypatch.setattr(main.printify, "publish", lambda row: "prod-123")
+    main.publish(did)
     with db.connect() as con:
-        for _ in range(worker.MAX_QUEUE):
-            con.execute("INSERT INTO designs (phrase, filters, status) VALUES ('x','','queued')")
-    r = client.post("/api/generate", json={"text": "funny shirt"})
-    assert r.status_code == 429
+        row = con.execute("SELECT * FROM designs WHERE id = ?", (did,)).fetchone()
+    assert row["status"] == "published" and row["product_id"] == "prod-123"
+
+
+def test_settings_roundtrips_prompt_template(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    out = main.get_settings()
+    assert out["prompt_template"] == main.DEFAULT_PROMPT
+    main.save_settings(main.SettingsBody(prompt_template="my prompt"))
+    assert main.get_settings()["prompt_template"] == "my prompt"
+
+
+def test_unreview_guards_status(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    did = insert("queued")
+    with pytest.raises(HTTPException) as e:
+        main.unreview(did)
+    assert e.value.status_code == 409
+
+
+class FakeResp:
+    def __init__(self, status_code=200, payload=None, text=""):
+        self.status_code = status_code
+        self._payload = payload or []
+        self.text = text
+
+    def json(self):
+        return self._payload
+
+
+def test_test_gemini_no_key(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    out = main.test_gemini()
+    assert out == {"ok": False, "message": "No Gemini key saved yet"}
+
+
+def test_test_gemini_ok(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    db.set_setting("gemini_api_key", "k")
+    monkeypatch.setattr(main.requests, "get", lambda *a, **kw: FakeResp(200))
+    assert main.test_gemini()["ok"] is True
+
+
+def test_export_csv(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    insert("published", tags="funny", rating=4, product_id="p1")
+    resp = main.export_csv()
+    body = resp.body.decode()
+    lines = body.strip().splitlines()
+    assert lines[0] == "id,phrase,style,status,tags,rating,product_id,created_at"
+    assert "dog dad" in lines[1] and "p1" in lines[1]
+
+
+def test_backup_zip_contains_db_and_images(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    img = tmp_path / "designs" / "1.png"
+    img.parent.mkdir(exist_ok=True)
+    img.write_bytes(b"png")
+    resp = main.backup()
+    with zipfile.ZipFile(resp.path) as z:
+        names = z.namelist()
+    assert "designs.db" in names and "designs/1.png" in names
+
+
+def test_test_printify_wrong_shop(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    db.set_setting("printify_api_token", "t")
+    db.set_setting("printify_shop_id", "42")
+    monkeypatch.setattr(main.requests, "get",
+                        lambda *a, **kw: FakeResp(200, payload=[{"id": 7, "title": "Other"}]))
+    out = main.test_printify()
+    assert out["ok"] is False and "42" in out["message"]

@@ -19,6 +19,14 @@ def test_usage_counter(tmp_path, monkeypatch):
     assert db.images_today() == 2
 
 
+def test_migrations_add_columns_idempotently(tmp_path, monkeypatch):
+    setup_tmp(tmp_path, monkeypatch)
+    db.init()  # run twice: must not raise
+    with db.connect() as con:
+        cols = {r["name"] for r in con.execute("PRAGMA table_info(designs)")}
+    assert {"tags", "rating", "product_id", "reviewed_at"} <= cols
+
+
 def test_settings_roundtrip_and_env_fallback(tmp_path, monkeypatch):
     setup_tmp(tmp_path, monkeypatch)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)

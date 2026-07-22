@@ -29,13 +29,22 @@ def connect() -> sqlite3.Connection:
     return con
 
 
+MIGRATIONS = (
+    ("tags", "ALTER TABLE designs ADD COLUMN tags TEXT NOT NULL DEFAULT ''"),
+    ("rating", "ALTER TABLE designs ADD COLUMN rating INTEGER NOT NULL DEFAULT 0"),
+    ("product_id", "ALTER TABLE designs ADD COLUMN product_id TEXT"),
+    ("reviewed_at", "ALTER TABLE designs ADD COLUMN reviewed_at TEXT"),
+    ("test", "ALTER TABLE designs ADD COLUMN test INTEGER NOT NULL DEFAULT 0"),
+)
+
+
 def init() -> None:
     with connect() as con:
         con.executescript(SCHEMA)
-        # migrate DBs created before the Test tab existed
         cols = {r["name"] for r in con.execute("PRAGMA table_info(designs)")}
-        if "test" not in cols:
-            con.execute("ALTER TABLE designs ADD COLUMN test INTEGER NOT NULL DEFAULT 0")
+        for col, stmt in MIGRATIONS:
+            if col not in cols:
+                con.execute(stmt)
 
 
 def get_setting(key: str, default=None):
