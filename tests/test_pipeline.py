@@ -1,4 +1,4 @@
-from pipeline import parse_input, build_prompt
+from pipeline import parse_input, build_prompt, step_progress
 
 
 def test_parse_basic():
@@ -28,3 +28,13 @@ def test_prompt_includes_phrase_and_filters():
 
 def test_prompt_without_filters_has_no_style_clause():
     assert "Style:" not in build_prompt("dog dad", "")
+
+
+def test_step_progress_maps_steps_to_reserved_percent():
+    assert [step_progress(i, 4) for i in range(4)] == [20, 40, 60, 80]
+
+
+def test_step_progress_monotonic_and_below_100():
+    pct = [step_progress(i, 4) for i in range(4)]
+    assert pct == sorted(pct)
+    assert max(pct) < 100
