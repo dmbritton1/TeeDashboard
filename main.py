@@ -17,6 +17,7 @@ from starlette.background import BackgroundTask
 import db
 import pipeline
 import printify
+import refine
 import upscale
 import worker
 
@@ -63,6 +64,7 @@ class GenerateBody(BaseModel):
     text: str
     variations: int = 2
     style: str = ""
+    refine: bool = True
 
 
 class PatchBody(BaseModel):
@@ -75,11 +77,11 @@ class TestBody(BaseModel):
 
 
 class SettingsBody(BaseModel):
-    gemini_api_key: str = ""
     printify_api_token: str = ""
     printify_shop_id: str = ""
     access_code: str = ""
     prompt_template: str = ""
+    refine_prompt: str = ""
 
 
 @app.post("/api/generate")
@@ -89,15 +91,34 @@ def generate(body: GenerateBody, _gate: None = Depends(require_access_code)):
         raise HTTPException(400, "No valid lines found")
     if _queue_full():
         raise HTTPException(429, "Queue is full - try again shortly")
+    system_prompt = db.get_setting("refine_prompt") or refine.DEFAULT_REFINE_PROMPT
+    refined_any = False
+    queued = 0
     with db.connect() as con:
         for phrase, filters in items:
             filters = pipeline.style_filters(body.style, filters)
-            for _ in range(body.variations):
-                con.execute(
-                    "INSERT INTO designs (phrase, filters, status) VALUES (?, ?, 'queued')",
-                    (phrase, filters),
-                )
-    return {"queued": len(items) * body.variations}
+            prompts = None
+            if body.refine:
+                try:
+                    prompts = refine.refine(phrase, filters, body.variations, system_prompt)
+                except Exception:
+                    prompts = None  # any failure -> fall back to the template path below
+            if prompts:
+                refined_any = True
+                for p in prompts:
+                    con.execute(
+                        "INSERT INTO designs (phrase, filters, prompt, status) VALUES (?, ?, ?, 'queued')",
+                        (phrase, filters, p),
+                    )
+                    queued += 1
+            else:
+                for _ in range(body.variations):
+                    con.execute(
+                        "INSERT INTO designs (phrase, filters, status) VALUES (?, ?, 'queued')",
+                        (phrase, filters),
+                    )
+                    queued += 1
+    return {"queued": queued, "refined": refined_any}
 
 
 @app.post("/api/test")
@@ -265,9 +286,10 @@ def publish(design_id: int, _gate: None = Depends(require_access_code)):
 
 @app.get("/api/settings")
 def get_settings():
-    keys = ("gemini_api_key", "printify_api_token", "printify_shop_id")
+    keys = ("printify_api_token", "printify_shop_id")
     out = {k: bool(db.get_setting(k)) for k in keys}
     out["prompt_template"] = db.get_setting("prompt_template") or DEFAULT_PROMPT
+    out["refine_prompt"] = db.get_setting("refine_prompt") or refine.DEFAULT_REFINE_PROMPT
     return out
 
 
@@ -277,23 +299,6 @@ def save_settings(body: SettingsBody, _gate: None = Depends(require_access_code)
         if v.strip():
             db.set_setting(k, v.strip())
     return {"ok": True}
-
-
-@app.post("/api/test/gemini")
-def test_gemini():
-    key = db.get_setting("gemini_api_key")
-    if not key:
-        return {"ok": False, "message": "No Gemini key saved yet"}
-    try:
-        r = requests.get(
-            "https://generativelanguage.googleapis.com/v1beta/models",
-            headers={"x-goog-api-key": key}, timeout=15,
-        )
-    except Exception as e:
-        return {"ok": False, "message": "Couldn't reach Google: %s" % e}
-    if r.status_code == 200:
-        return {"ok": True, "message": "Gemini key works"}
-    return {"ok": False, "message": "Google says: %s" % r.text[:300]}
 
 
 @app.post("/api/test/printify")
@@ -358,14 +363,9 @@ def status():
         queued = con.execute(
             "SELECT COUNT(*) AS c FROM designs WHERE status IN ('queued', 'generating')"
         ).fetchone()["c"]
-    today = db.images_today()
     return {
-        "today": today,
-        "cap": worker.DAILY_CAP,
         "queued": queued,
-        "paused": not pipeline.has_local() and today >= worker.DAILY_CAP,
         "local": pipeline.has_local(),
-        "has_key": bool(db.get_setting("gemini_api_key")),
         "printify_ready": bool(
             db.get_setting("printify_api_token") and db.get_setting("printify_shop_id")
         ),
