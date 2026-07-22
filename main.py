@@ -93,32 +93,27 @@ def generate(body: GenerateBody, _gate: None = Depends(require_access_code)):
         raise HTTPException(429, "Queue is full - try again shortly")
     system_prompt = db.get_setting("refine_prompt") or refine.DEFAULT_REFINE_PROMPT
     refined_any = False
-    queued = 0
+    rows = []  # (phrase, filters, prompt-or-None) — built before opening the DB so the
+    # slow Gemma call never holds the sqlite write lock against the worker thread
+    for phrase, filters in items:
+        filters = pipeline.style_filters(body.style, filters)
+        prompts = None
+        if body.refine:
+            try:
+                prompts = refine.refine(phrase, filters, body.variations, system_prompt)
+            except Exception:
+                prompts = None  # any failure -> fall back to the template path
+        if prompts:
+            refined_any = True
+            rows.extend((phrase, filters, p) for p in prompts)
+        else:
+            rows.extend((phrase, filters, None) for _ in range(body.variations))
     with db.connect() as con:
-        for phrase, filters in items:
-            filters = pipeline.style_filters(body.style, filters)
-            prompts = None
-            if body.refine:
-                try:
-                    prompts = refine.refine(phrase, filters, body.variations, system_prompt)
-                except Exception:
-                    prompts = None  # any failure -> fall back to the template path below
-            if prompts:
-                refined_any = True
-                for p in prompts:
-                    con.execute(
-                        "INSERT INTO designs (phrase, filters, prompt, status) VALUES (?, ?, ?, 'queued')",
-                        (phrase, filters, p),
-                    )
-                    queued += 1
-            else:
-                for _ in range(body.variations):
-                    con.execute(
-                        "INSERT INTO designs (phrase, filters, status) VALUES (?, ?, 'queued')",
-                        (phrase, filters),
-                    )
-                    queued += 1
-    return {"queued": queued, "refined": refined_any}
+        con.executemany(
+            "INSERT INTO designs (phrase, filters, prompt, status) VALUES (?, ?, ?, 'queued')",
+            rows,
+        )
+    return {"queued": len(rows), "refined": refined_any}
 
 
 @app.post("/api/test")
