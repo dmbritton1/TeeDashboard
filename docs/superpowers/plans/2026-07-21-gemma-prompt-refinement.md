@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Model: `gemma-3-27b-it`, defined as one constant `GEMMA_MODEL` in `refine.py`.
+- Model: `gemma-4-31b-it`, defined as one constant `GEMMA_MODEL` in `refine.py`.
 - Gemma on the Gemini API has **no system role** — the system prompt must be folded into the `contents` string, not passed as `system_instruction`.
 - API key comes from `db.get_setting("gemini_api_key")` (which falls back to the `GEMINI_API_KEY` env var via `get_setting`'s upper-case lookup). Never hardcode.
 - Refinement failures must **never** block generation: fall back to the existing `pipeline.build_prompt` path and report `refined: false`.
@@ -77,7 +77,7 @@ import re
 
 import db
 
-GEMMA_MODEL = "gemma-3-27b-it"
+GEMMA_MODEL = "gemma-4-31b-it"
 
 DEFAULT_REFINE_PROMPT = (
     "You are an art director for a print-on-demand t-shirt brand. Given a concept "

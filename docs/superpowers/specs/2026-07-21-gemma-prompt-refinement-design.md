@@ -14,7 +14,7 @@ plus the per-line input.
 
 ## Key behaviors (locked with user)
 
-1. **Model source:** Gemini API's Gemma model (`gemma-3-27b-it`) via the already
+1. **Model source:** Gemini API's Gemma model (`gemma-4-31b-it`) via the already
    installed `google-genai` and the existing `GEMINI_API_KEY`. Gemma is a text
    model on a **separate quota** from image generation, so it works even while
    the image quota is capped. No local model (keeps the 8GB Mac free).
@@ -38,7 +38,7 @@ plus the per-line input.
 
 ```
 DEFAULT_REFINE_PROMPT: str   # the starting system prompt (t-shirt rules + creative brief)
-GEMMA_MODEL = "gemma-3-27b-it"  # one constant, easy to swap
+GEMMA_MODEL = "gemma-4-31b-it"  # one constant, easy to swap
 
 def refine(phrase: str, filters: str, n: int, system_prompt: str) -> list[str]:
     """One Gemma call → n distinct ready-to-generate image prompts.
