@@ -38,6 +38,23 @@ def test_generates_writes_file(tmp_path, monkeypatch):
     assert row["file"] == "designs/%d.png" % row["id"]
 
 
+def test_reports_progress_via_callback(tmp_path, monkeypatch):
+    setup_tmp(tmp_path, monkeypatch, local=True)
+
+    def fake(prompt, on_step=None):
+        on_step(20)
+        on_step(80)
+        return b"fake-png"
+
+    monkeypatch.setattr(worker.pipeline, "generate_image_local", fake)
+    queue_one()
+    assert worker.process_next() is True
+    with db.connect() as con:
+        row = con.execute("SELECT * FROM designs").fetchone()
+    assert row["status"] == "pending"
+    assert row["progress"] == 80
+
+
 def test_failure_marks_failed_with_error(tmp_path, monkeypatch):
     setup_tmp(tmp_path, monkeypatch, local=True)
 

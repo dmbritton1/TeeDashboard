@@ -141,14 +141,33 @@ def _build_flux():
     return pipe
 
 
-def generate_image_local(prompt: str) -> bytes:
-    """Generate one PNG with FLUX.1-schnell on the local GPU (needs requirements-local.txt)."""
+FLUX_STEPS = 4
+
+
+def step_progress(step_index: int, steps: int) -> int:
+    """Percent to show after finishing step `step_index` (0-based) of `steps`.
+    Reserves the top of the bar for the VAE decode that follows the loop."""
+    return round((step_index + 1) / (steps + 1) * 100)
+
+
+def generate_image_local(prompt: str, on_step=None) -> bytes:
+    """Generate one PNG with FLUX.1-schnell on the local GPU (needs requirements-local.txt).
+    on_step(pct) is called after each denoising step with an int 0-100."""
     global _flux
     import io
 
     if _flux is None:
         _flux = _build_flux()
-    img = _flux(prompt, num_inference_steps=4, guidance_scale=0.0, width=1024, height=1024).images[0]
+
+    def _cb(pipe, step_index, timestep, kwargs):
+        if on_step:
+            on_step(step_progress(step_index, FLUX_STEPS))
+        return kwargs
+
+    img = _flux(
+        prompt, num_inference_steps=FLUX_STEPS, guidance_scale=0.0,
+        width=1024, height=1024, callback_on_step_end=_cb,
+    ).images[0]
     buf = io.BytesIO()
     img.save(buf, "PNG")
     return buf.getvalue()

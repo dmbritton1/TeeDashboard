@@ -21,12 +21,19 @@ def process_next() -> bool:
         ).fetchone()
         if not row:
             return False
-        con.execute("UPDATE designs SET status = 'generating' WHERE id = ?", (row["id"],))
+        con.execute(
+            "UPDATE designs SET status = 'generating', progress = 0 WHERE id = ?", (row["id"],)
+        )
     try:
         # A refined Gemma prompt (or a raw Test-tab prompt) is used verbatim;
         # otherwise wrap the phrase in the t-shirt template.
         prompt = row["prompt"] or (row["phrase"] if row["test"] else pipeline.build_prompt(row["phrase"], row["filters"]))
-        png = pipeline.generate_image_local(prompt)
+
+        def on_step(pct):
+            with db.connect() as con:
+                con.execute("UPDATE designs SET progress = ? WHERE id = ?", (pct, row["id"]))
+
+        png = pipeline.generate_image_local(prompt, on_step=on_step)
         os.makedirs(DESIGNS_DIR, exist_ok=True)
         with open(os.path.join(DESIGNS_DIR, "%d.png" % row["id"]), "wb") as f:
             f.write(png)

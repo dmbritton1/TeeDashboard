@@ -32,7 +32,7 @@ os.makedirs(os.path.join(BASE, "designs"), exist_ok=True)
 db.init()
 with db.connect() as con:
     # requeue rows orphaned by a shutdown mid-generation
-    con.execute("UPDATE designs SET status = 'queued' WHERE status = 'generating'")
+    con.execute("UPDATE designs SET status = 'queued', progress = 0 WHERE status = 'generating'")
 worker.start()
 
 app = FastAPI(title="T-Shirt Design Pipeline")

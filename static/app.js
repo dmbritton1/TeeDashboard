@@ -338,14 +338,34 @@ function emptyItem(msg) {
   return {key: EMPTY_KEY, html: `<div class="empty"><span class="fleuron">❦</span>${msg}</div>`};
 }
 
+// Only the actively-generating design shows a bar; it eases forward between the
+// 3s polls, then snaps to the real value as each FLUX step lands. The card html
+// embeds the real progress (stable signature for syncChildren); creepTick drives
+// the between-poll drift directly on the DOM node.
+let creepId = null, creepVal = 0;
+function progressBar(d) {
+  return `<div class="progress"><div class="bar" data-id="${d.id}" style="width:${Math.max(2, d.progress || 0)}%"></div></div>`;
+}
+function creepTick() {
+  const active = designs.find(d => d.status === "generating");
+  if (!active) { creepId = null; creepVal = 0; return; }
+  if (active.id !== creepId) { creepId = active.id; creepVal = active.progress || 0; }
+  const target = Math.min((active.progress || 0) + 18, 96);   // lead ahead, capped
+  creepVal = Math.max(creepVal, Math.min(target, creepVal + 0.4));  // monotonic, always drifting up
+  const bar = document.querySelector(`.bar[data-id="${creepId}"]`);
+  if (bar) bar.style.width = Math.max(2, creepVal) + "%";
+}
+setInterval(creepTick, 120);
+
 function card(d) {
+
   const generating = d.status === "queued" || d.status === "generating";
   const pick = d.status === "pending"
     ? `<input type="checkbox" class="pick" ${selected.has(d.id) ? "checked" : ""} onclick="togglePick(${d.id}, this.checked)">`
     : "";
   const img = d.file
     ? `<img src="/${d.file}" loading="lazy" alt="${esc(d.phrase)}">`
-    : `<div class="placeholder ${generating ? "working" : ""}">${generating ? "in press…" : "no image"}</div>`;
+    : `<div class="placeholder ${generating ? "working" : ""}">${generating ? "in press…" + (d.status === "generating" ? progressBar(d) : "") : "no image"}</div>`;
   const buttons = {
     pending: `<button class="gilt" onclick="act(this,${d.id},'approve')">✓ Approve</button><button onclick="act(this,${d.id},'reject')">✕ Reject</button><button onclick="act(this,${d.id},'regenerate')">↻ Regenerate</button>`,
     approved: (stat.printify_ready
@@ -575,7 +595,7 @@ function testCard(d) {
   const generating = d.status === "queued" || d.status === "generating";
   const img = d.file
     ? `<img src="/${d.file}" loading="lazy" alt="${esc(d.phrase)}" onclick="openLightbox(${d.id})" style="cursor:zoom-in">`
-    : `<div class="placeholder ${generating ? "working" : ""}">${generating ? "in press…" : (d.error ? "failed" : "no image")}</div>`;
+    : `<div class="placeholder ${generating ? "working" : ""}">${generating ? "in press…" + (d.status === "generating" ? progressBar(d) : "") : (d.error ? "failed" : "no image")}</div>`;
   return `<div class="card"><div class="frame">${img}</div>` +
     `<div class="body"><div class="filters" style="white-space:pre-wrap">${esc(d.phrase)}</div>` +
     (d.error ? `<div class="error">${esc(d.error)}</div>` : "") +
@@ -680,6 +700,9 @@ async function refresh() {
       ? `local GPU · ${status.queued} in press`
       : `⚠ no GPU detected here · ${status.queued} in press`;
     document.querySelector("#statusbar .dot").classList.toggle("live", status.queued > 0);
+    const orb = document.getElementById("orb");
+    orb.classList.toggle("live", status.queued > 0);
+    document.getElementById("orb_count").textContent = status.queued > 0 ? status.queued : "";
     document.getElementById("code_state").textContent =
       status.access_code ? "code set ✓ — link is gated" : "no code — anyone with the link can queue";
     render();

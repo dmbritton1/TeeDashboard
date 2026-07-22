@@ -196,6 +196,14 @@ label { font-size: 13px; color: var(--stone); min-width: 108px; }
   color: var(--gold-soft);
 }
 @keyframes sheen { 0%, 100% { background-position: 100% 0; } 50% { background-position: 0 0; } }
+.placeholder.working { position: relative; }
+.progress { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: rgba(0, 0, 0, 0.45); }
+.progress .bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--gold), var(--gold-leaf));
+  box-shadow: 0 0 8px var(--gold);
+  transition: width 0.3s linear;
+}
 .card .body { padding: 14px 16px 4px; }
 .card .phrase { font-family: "Italiana", serif; font-size: 19px; line-height: 1.25; letter-spacing: 0.03em; }
 .card .filters { font-family: var(--mono); font-size: 11px; color: var(--stone); margin-top: 6px; }
@@ -295,4 +303,18 @@ select, input[type=date] {
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+.orb {
+  position: fixed; top: 16px; right: 18px; z-index: 60;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--vein-grey); transition: background 0.4s;
+}
+.orb.live {
+  background: var(--gold-soft);
+  box-shadow: 0 0 16px 3px var(--gold);
+  animation: pulse 2.4s ease-in-out infinite;
+}
+.orb .orb-count {
+  position: absolute; top: 17px; right: 0; white-space: nowrap;
+  font-family: var(--mono); font-size: 10px; color: var(--gold-soft);
 }
