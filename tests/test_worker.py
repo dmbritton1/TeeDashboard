@@ -54,13 +54,30 @@ def test_generates_writes_file_and_counts(tmp_path, monkeypatch):
 
 def test_local_gpu_needs_no_key_and_skips_cap(tmp_path, monkeypatch):
     setup_tmp(tmp_path, monkeypatch, local=True)
-    monkeypatch.setattr(worker.pipeline, "generate_image_local", lambda prompt: b"fake-png")
+    monkeypatch.setattr(worker.pipeline, "generate_image_local", lambda prompt, on_step=None: b"fake-png")
     queue_one()
     assert worker.process_next() is True
     with db.connect() as con:
         row = con.execute("SELECT * FROM designs").fetchone()
     assert row["status"] == "pending"
     assert db.images_today() == 0  # local generations don't consume the Gemini cap
+
+
+def test_reports_progress_via_callback(tmp_path, monkeypatch):
+    setup_tmp(tmp_path, monkeypatch, local=True)
+
+    def fake(prompt, on_step=None):
+        on_step(20)
+        on_step(80)
+        return b"fake-png"
+
+    monkeypatch.setattr(worker.pipeline, "generate_image_local", fake)
+    queue_one()
+    assert worker.process_next() is True
+    with db.connect() as con:
+        row = con.execute("SELECT * FROM designs").fetchone()
+    assert row["status"] == "pending"
+    assert row["progress"] == 80
 
 
 def test_failure_marks_failed_with_error(tmp_path, monkeypatch):
