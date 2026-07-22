@@ -27,6 +27,17 @@ def test_migrations_add_columns_idempotently(tmp_path, monkeypatch):
     assert {"tags", "rating", "product_id", "reviewed_at"} <= cols
 
 
+def test_progress_column_added_with_default_zero(tmp_path, monkeypatch):
+    setup_tmp(tmp_path, monkeypatch)
+    db.init()  # run twice: must not raise
+    with db.connect() as con:
+        cols = {r["name"] for r in con.execute("PRAGMA table_info(designs)")}
+        assert "progress" in cols
+        con.execute("INSERT INTO designs (phrase) VALUES ('x')")
+        row = con.execute("SELECT progress FROM designs").fetchone()
+    assert row["progress"] == 0
+
+
 def test_settings_roundtrip_and_env_fallback(tmp_path, monkeypatch):
     setup_tmp(tmp_path, monkeypatch)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
