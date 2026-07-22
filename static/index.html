@@ -91,8 +91,15 @@
         </div>
         <div class="row">
           <button class="gilt" onclick="generate()">Generate designs</button>
+          <label style="min-width:0"><input type="checkbox" id="refine_toggle" checked> Refine with Gemma</label>
           <span class="hint">2 variations per line · paced ~2/min to stay inside the free tier</span>
         </div>
+        <details class="panel" style="margin-top:12px">
+          <summary>Creative refinement (advanced)</summary>
+          <div class="panel-label" style="margin-top:8px">System prompt — how Gemma rewrites your lines into creative prompts</div>
+          <textarea id="refine_box" spellcheck="false"></textarea>
+          <span class="hint">Edits save automatically · leave blank to use the built-in default · <code>{n}</code> is replaced by the variation count</span>
+        </details>
         <div class="row">
           <label for="csv_file" style="min-width:0">Or upload a CSV</label>
           <input type="file" id="csv_file" accept=".csv,text/csv">
@@ -146,14 +153,6 @@
       <section class="panel">
         <div class="panel-label">Connections</div>
         <div class="row">
-          <label>Gemini API key</label>
-          <input type="password" id="gemini_key" placeholder="paste key from aistudio.google.com">
-          <button onclick="saveSettings()">Save</button>
-          <button onclick="testConn('gemini')">Test</button>
-          <span class="hint" id="key_state"></span>
-          <span class="hint" id="test_gemini"></span>
-        </div>
-        <div class="row">
           <label>Printify token</label>
           <input type="password" id="printify_token" placeholder="optional, for publishing">
         </div>
@@ -162,6 +161,7 @@
           <input type="text" id="printify_shop" placeholder="shop id" style="width:140px">
         </div>
         <div class="row">
+          <button onclick="saveSettings()">Save</button>
           <button onclick="testConn('printify')">Test Printify</button>
           <span class="hint" id="test_printify"></span>
         </div>
