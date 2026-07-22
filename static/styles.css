@@ -304,3 +304,17 @@ select, input[type=date] {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+.orb {
+  position: fixed; top: 16px; right: 18px; z-index: 60;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--vein-grey); transition: background 0.4s;
+}
+.orb.live {
+  background: var(--gold-soft);
+  box-shadow: 0 0 16px 3px var(--gold);
+  animation: pulse 2.4s ease-in-out infinite;
+}
+.orb .orb-count {
+  position: absolute; top: 17px; right: 0; white-space: nowrap;
+  font-family: var(--mono); font-size: 10px; color: var(--gold-soft);
+}

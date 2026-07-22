@@ -636,6 +636,9 @@ async function refresh() {
         (status.has_key ? "" : " · ⚠ no API key") +
         (status.paused ? " · daily cap reached — resumes tomorrow" : "");
     document.querySelector("#statusbar .dot").classList.toggle("live", status.queued > 0);
+    const orb = document.getElementById("orb");
+    orb.classList.toggle("live", status.queued > 0);
+    document.getElementById("orb_count").textContent = status.queued > 0 ? status.queued : "";
     document.getElementById("key_state").textContent = status.has_key ? "key saved ✓" : "no key saved";
     document.getElementById("code_state").textContent =
       status.access_code ? "code set ✓ — link is gated" : "no code — anyone with the link can queue";
