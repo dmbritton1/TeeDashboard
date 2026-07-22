@@ -289,6 +289,26 @@ async function bulkAct(action) {
   refresh();
 }
 
+// Only the actively-generating design shows a bar; it eases forward between the
+// 3s polls, then snaps to the real value as each FLUX step lands.
+let creepId = null, creepVal = 0;
+function barVisual(d) {
+  return d.id === creepId ? creepVal : (d.progress || 0);
+}
+function progressBar(d) {
+  return `<div class="progress"><div class="bar" data-id="${d.id}" style="width:${Math.max(2, barVisual(d))}%"></div></div>`;
+}
+function creepTick() {
+  const active = designs.find(d => d.status === "generating");
+  if (!active) { creepId = null; creepVal = 0; return; }
+  if (active.id !== creepId) { creepId = active.id; creepVal = active.progress || 0; }
+  const target = Math.min((active.progress || 0) + 18, 96);   // lead ahead, capped
+  creepVal = Math.max(creepVal, Math.min(target, creepVal + 0.4));  // monotonic, always drifting up
+  const bar = document.querySelector(`.bar[data-id="${creepId}"]`);
+  if (bar) bar.style.width = Math.max(2, creepVal) + "%";
+}
+setInterval(creepTick, 120);
+
 function card(d, i) {
   const generating = d.status === "queued" || d.status === "generating";
   const pick = d.status === "pending"
@@ -296,7 +316,7 @@ function card(d, i) {
     : "";
   const img = d.file
     ? `<img src="/${d.file}" loading="lazy" alt="${esc(d.phrase)}">`
-    : `<div class="placeholder ${generating ? "working" : ""}">${generating ? "in press…" : "no image"}</div>`;
+    : `<div class="placeholder ${generating ? "working" : ""}">${generating ? "in press…" + (d.status === "generating" ? progressBar(d) : "") : "no image"}</div>`;
   const buttons = {
     pending: `<button class="gilt" onclick="act(this,${d.id},'approve')">✓ Approve</button><button onclick="act(this,${d.id},'reject')">✕ Reject</button><button onclick="act(this,${d.id},'regenerate')">↻ Regenerate</button>`,
     approved: (stat.printify_ready
@@ -515,7 +535,7 @@ function testCard(d, i) {
   const generating = d.status === "queued" || d.status === "generating";
   const img = d.file
     ? `<img src="/${d.file}" loading="lazy" alt="${esc(d.phrase)}" onclick="openLightbox(${d.id})" style="cursor:zoom-in">`
-    : `<div class="placeholder ${generating ? "working" : ""}">${generating ? "in press…" : (d.error ? "failed" : "no image")}</div>`;
+    : `<div class="placeholder ${generating ? "working" : ""}">${generating ? "in press…" + (d.status === "generating" ? progressBar(d) : "") : (d.error ? "failed" : "no image")}</div>`;
   return `<div class="card" style="animation-delay:${Math.min(i * 40, 400)}ms"><div class="frame">${img}</div>` +
     `<div class="body"><div class="filters" style="white-space:pre-wrap">${esc(d.phrase)}</div>` +
     (d.error ? `<div class="error">${esc(d.error)}</div>` : "") +
