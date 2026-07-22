@@ -35,6 +35,7 @@ MIGRATIONS = (
     ("product_id", "ALTER TABLE designs ADD COLUMN product_id TEXT"),
     ("reviewed_at", "ALTER TABLE designs ADD COLUMN reviewed_at TEXT"),
     ("test", "ALTER TABLE designs ADD COLUMN test INTEGER NOT NULL DEFAULT 0"),
+    ("prompt", "ALTER TABLE designs ADD COLUMN prompt TEXT"),
 )
 
 
