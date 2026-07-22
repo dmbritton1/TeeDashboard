@@ -35,3 +35,11 @@ def test_settings_roundtrip_and_env_fallback(tmp_path, monkeypatch):
     assert db.get_setting("gemini_api_key") == "env-key"
     db.set_setting("gemini_api_key", "db-key")
     assert db.get_setting("gemini_api_key") == "db-key"
+
+
+def test_prompt_column_exists(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "test.db"))
+    db.init()
+    with db.connect() as con:
+        cols = {r["name"] for r in con.execute("PRAGMA table_info(designs)")}
+    assert "prompt" in cols

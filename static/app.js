@@ -197,8 +197,12 @@ async function queueItems(items) {
   if (!items.length) { flash("Nothing new to queue"); return; }
   const text = items.map(([p, f]) => f ? `${p} | ${f}` : p).join("\n");
   const style = document.getElementById("style_select").value;
-  await api("/api/generate", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text, style})});
-  flash(`Queued ${items.length} idea${items.length === 1 ? "" : "s"} (2 variations each)`);
+  const refine = document.getElementById("refine_toggle").checked;
+  const res = await api("/api/generate", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text, style, refine})});
+  if (refine && res.refined === false)
+    flash("Gemma refinement was skipped — generated from the basic template instead.");
+  else
+    flash(`Queued ${items.length} idea${items.length === 1 ? "" : "s"} (2 variations each)`);
   refresh();
 }
 
@@ -226,7 +230,6 @@ document.getElementById("csv_file").addEventListener("change", async (ev) => {
 async function saveSettings() {
   const code = document.getElementById("access_code").value;
   const body = {
-    gemini_api_key: document.getElementById("gemini_key").value,
     printify_api_token: document.getElementById("printify_token").value,
     printify_shop_id: document.getElementById("printify_shop").value,
     access_code: code,
@@ -238,7 +241,6 @@ async function saveSettings() {
     flash("Settings saved");
   }
   catch (e) { alert(e.message); }
-  document.getElementById("gemini_key").value = "";
   document.getElementById("printify_token").value = "";
   document.getElementById("access_code").value = "";
   refresh();
@@ -676,11 +678,8 @@ async function refresh() {
     [...selected].forEach(id => { const d = designs.find(x => x.id === id); if (!d || d.status !== "pending") selected.delete(id); });
     document.getElementById("status_text").textContent = status.local
       ? `local GPU · ${status.queued} in press`
-      : `today: ${status.today}/${status.cap} images · ${status.queued} in press` +
-        (status.has_key ? "" : " · ⚠ no API key") +
-        (status.paused ? " · daily cap reached — resumes tomorrow" : "");
+      : `⚠ no GPU detected here · ${status.queued} in press`;
     document.querySelector("#statusbar .dot").classList.toggle("live", status.queued > 0);
-    document.getElementById("key_state").textContent = status.has_key ? "key saved ✓" : "no key saved";
     document.getElementById("code_state").textContent =
       status.access_code ? "code set ✓ — link is gated" : "no code — anyone with the link can queue";
     render();
@@ -690,7 +689,7 @@ async function refresh() {
     document.getElementById("badge_test").textContent = testDesigns.length || "";
     document.getElementById("gen_info").textContent = status.local
       ? "Generating on your local GPU — no daily cap."
-      : `Gemini free tier: ${status.today}/${status.cap} images used today · 2 variations per idea · ~2 images/min.`;
+      : "No GPU detected here — run Compound on the machine with the graphics card to generate images.";
   } catch (e) { document.getElementById("status_text").textContent = "server unreachable"; }
   finally { polling = false; }
 }
@@ -719,6 +718,7 @@ async function loadPrompt() {
   try {
     const s = await api("/api/settings");
     document.getElementById("prompt_box").value = s.prompt_template;
+    document.getElementById("refine_box").value = s.refine_prompt || "";
     promptLoaded = true;
   } catch (e) {}
 }
@@ -730,6 +730,17 @@ document.getElementById("prompt_box").addEventListener("input", () => {
       await api("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"},
         body: JSON.stringify({prompt_template: document.getElementById("prompt_box").value})});
     } catch (e) { flash("Couldn't save the prompt — " + e.message); }
+  }, 600);
+});
+let refineSaveTimer;
+document.getElementById("refine_box").addEventListener("input", () => {
+  if (!promptLoaded) return;
+  clearTimeout(refineSaveTimer);
+  refineSaveTimer = setTimeout(async () => {
+    try {
+      await api("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({refine_prompt: document.getElementById("refine_box").value})});
+    } catch (e) { flash("Couldn't save the system prompt — " + e.message); }
   }, 600);
 });
 async function copyPrompt() {

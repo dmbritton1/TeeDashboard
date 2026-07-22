@@ -148,19 +148,6 @@ class FakeResp:
         return self._payload
 
 
-def test_test_gemini_no_key(tmp_path, monkeypatch):
-    main = load_main(tmp_path, monkeypatch)
-    out = main.test_gemini()
-    assert out == {"ok": False, "message": "No Gemini key saved yet"}
-
-
-def test_test_gemini_ok(tmp_path, monkeypatch):
-    main = load_main(tmp_path, monkeypatch)
-    db.set_setting("gemini_api_key", "k")
-    monkeypatch.setattr(main.requests, "get", lambda *a, **kw: FakeResp(200))
-    assert main.test_gemini()["ok"] is True
-
-
 def test_export_csv(tmp_path, monkeypatch):
     main = load_main(tmp_path, monkeypatch)
     insert("published", tags="funny", rating=4, product_id="p1")
@@ -190,3 +177,40 @@ def test_test_printify_wrong_shop(tmp_path, monkeypatch):
                         lambda *a, **kw: FakeResp(200, payload=[{"id": 7, "title": "Other"}]))
     out = main.test_printify()
     assert out["ok"] is False and "42" in out["message"]
+
+
+import refine
+
+
+def test_generate_stores_refined_prompts(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    monkeypatch.setattr(refine, "refine", lambda ph, fi, n, sp: ["prompt A", "prompt B"][:n])
+    res = main.generate(main.GenerateBody(text="dog dad | vintage", variations=2, refine=True))
+    assert res == {"queued": 2, "refined": True}
+    with db.connect() as con:
+        prompts = [r["prompt"] for r in con.execute("SELECT prompt FROM designs ORDER BY id")]
+    assert prompts == ["prompt A", "prompt B"]
+
+
+def test_generate_falls_back_when_gemma_fails(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    def boom(*a, **k):
+        raise RuntimeError("no key")
+    monkeypatch.setattr(refine, "refine", boom)
+    res = main.generate(main.GenerateBody(text="dog dad | vintage", variations=2, refine=True))
+    assert res == {"queued": 2, "refined": False}
+    with db.connect() as con:
+        prompts = [r["prompt"] for r in con.execute("SELECT prompt FROM designs")]
+    assert prompts == [None, None]
+
+
+def test_generate_refine_off_skips_gemma(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    monkeypatch.setattr(refine, "refine", lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not call")))
+    res = main.generate(main.GenerateBody(text="dog dad | vintage", variations=1, refine=False))
+    assert res == {"queued": 1, "refined": False}
+
+
+def test_settings_returns_refine_prompt_default(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    assert main.get_settings()["refine_prompt"] == refine.DEFAULT_REFINE_PROMPT

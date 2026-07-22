@@ -1,7 +1,5 @@
 """Input parsing, prompt building, and image generation."""
 
-GEMINI_MODEL = "gemini-2.5-flash-image"
-
 PROMPT_TEMPLATE = (
     "Professional t-shirt graphic design: {phrase}. "
     "{style}Bold, high-contrast, visually striking artwork centered on a plain solid background. "
@@ -82,18 +80,6 @@ def build_prompt(phrase: str, filters: str) -> str:
     return PROMPT_TEMPLATE.format(phrase=phrase, style=style)
 
 
-def generate_image(prompt: str, api_key: str) -> bytes:
-    """Generate one PNG via Gemini. Swappable: replace this to use another model."""
-    from google import genai
-
-    client = genai.Client(api_key=api_key)
-    resp = client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
-    for part in resp.candidates[0].content.parts:
-        if part.inline_data and part.inline_data.data:
-            return part.inline_data.data
-    raise RuntimeError("Gemini returned no image (text: %s)" % (getattr(resp, "text", "") or "empty"))
-
-
 FLUX_MODEL = "black-forest-labs/FLUX.1-schnell"
 # 4-bit transformer: 6.9GB instead of the 24GB bf16 one, so it fits in a 10GB card.
 FLUX_GGUF = (
@@ -105,7 +91,7 @@ _flux = None
 
 
 def has_local() -> bool:
-    """True when an NVIDIA GPU is available: generate locally instead of via Gemini."""
+    """True when a CUDA/ROCm GPU is available to run FLUX locally."""
     global _has_local
     if _has_local is None:
         import sys
