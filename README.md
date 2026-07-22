@@ -90,11 +90,18 @@ can open it in a browser and queue images. Generation still happens locally.
 3. In another terminal, start a Cloudflare Quick Tunnel (install `cloudflared`
    first from Cloudflare's site):
 
-       cloudflared tunnel --url http://localhost:8000
+       cloudflared tunnel --url http://127.0.0.1:8000
 
    It prints a `https://<random>.trycloudflare.com` URL. Share it. Anyone who
    opens it gets the dashboard and, on first generate, is asked for the access
    code.
+
+   Use `127.0.0.1`, not `localhost`. On Windows `localhost` resolves to the IPv6
+   address `::1` first, but uvicorn listens on IPv4 only, so cloudflared dials
+   `[::1]:8000` and the connection is refused:
+
+       ERR Request failed error="Unable to reach the origin service ...
+           dial tcp [::1]:8000: connectex: No connection could be made ..."
 
 Notes: the tunnel URL changes each time you restart `cloudflared`. Generation is
 serialized on one GPU, so images queue (~a few minutes each); the queue is capped

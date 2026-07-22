@@ -289,7 +289,54 @@ async function bulkAct(action) {
   refresh();
 }
 
-function card(d, i) {
+// Redraws must never destroy a card whose image is still downloading. Over a
+// tunnel a 1MB PNG takes longer than the 3s poll, and destroying an <img>
+// cancels its request — so a blind innerHTML rebuild restarts the download
+// every poll and the image never arrives. Children are matched by key and
+// replaced only when their markup actually changed.
+function syncChildren(container, items) {
+  const old = new Map();
+  for (const el of [...container.children]) {
+    if (el.__key) old.set(el.__key, el); else el.remove();
+  }
+  items.forEach((it, i) => {
+    let el = old.get(it.key);
+    if (el) {
+      old.delete(it.key);
+      if (el.__sig !== it.html) {
+        const fresh = buildEl(it);
+        adoptImage(el, fresh);
+        el.replaceWith(fresh);
+        el = fresh;
+      }
+    } else {
+      el = buildEl(it);
+    }
+    if (container.children[i] !== el) container.insertBefore(el, container.children[i] || null);
+    if (it.children) syncChildren(el.querySelector(".vg-cards"), it.children);
+  });
+  old.forEach(el => el.remove());
+}
+function buildEl(it) {
+  const t = document.createElement("template");
+  t.innerHTML = it.html.trim();
+  const el = t.content.firstElementChild;
+  el.__key = it.key;
+  el.__sig = it.html;
+  return el;
+}
+// When a card is rebuilt for an unrelated reason (status flip, selection), move
+// the live <img> across instead of letting the new markup start a fresh fetch.
+function adoptImage(oldEl, newEl) {
+  const a = oldEl.querySelector("img"), b = newEl.querySelector("img");
+  if (a && b && a.getAttribute("src") === b.getAttribute("src")) b.replaceWith(a);
+}
+const EMPTY_KEY = "__empty";
+function emptyItem(msg) {
+  return {key: EMPTY_KEY, html: `<div class="empty"><span class="fleuron">❦</span>${msg}</div>`};
+}
+
+function card(d) {
   const generating = d.status === "queued" || d.status === "generating";
   const pick = d.status === "pending"
     ? `<input type="checkbox" class="pick" ${selected.has(d.id) ? "checked" : ""} onclick="togglePick(${d.id}, this.checked)">`
@@ -307,7 +354,7 @@ function card(d, i) {
     failed: `<button onclick="act(this,${d.id},'retry')">↻ Retry</button><button onclick="removeDesign(this,${d.id},'delete')">🗑 Delete</button>`,
     rejected: `<button onclick="act(this,${d.id},'retry')">↻ Re-queue</button><button onclick="act(this,${d.id},'unreview')">↩ Back to review</button><button onclick="removeDesign(this,${d.id},'delete')">🗑 Delete</button>`,
   }[d.status] || "";
-  return `<div class="card${selected.has(d.id) ? " selected" : ""}" data-id="${d.id}" style="animation-delay:${Math.min(i * 40, 400)}ms"><div class="frame">${pick}${img}</div><div class="body"><div class="phrase">${esc(d.phrase)}</div>` +
+  return `<div class="card${selected.has(d.id) ? " selected" : ""}" data-id="${d.id}"><div class="frame">${pick}${img}</div><div class="body"><div class="phrase">${esc(d.phrase)}</div>` +
     `<div class="filters">${esc(d.filters)}</div>` +
     (d.error ? `<div class="error">${esc(d.error)}</div>` : "") +
     `</div><div class="actions">${buttons}</div></div>`;
@@ -337,26 +384,36 @@ function render() {
        </div>`
     : "";
   const legend = `<div id="keylegend" style="grid-column:1/-1"><b>→/←</b> move · <b>A</b> approve · <b>R</b> reject · <b>U</b> undo · <b>space</b> zoom</div>`;
-  let cardsHtml;
-  if (tab === "pending") {
+  const items = [];
+  if (tab === "pending" && shown.length) {
+    items.push({key: "__legend", html: legend});
+    items.push({key: "__bulk", html: bulkbar});
+  }
+  if (!shown.length) {
+    items.push(emptyItem("Nothing here yet — commission some ideas above."));
+  } else if (tab === "pending") {
     const groups = new Map();
     shown.forEach(d => {
       const k = d.phrase + "|" + d.filters;
       if (!groups.has(k)) groups.set(k, []);
       groups.get(k).push(d);
     });
-    cardsHtml = [...groups.values()].map(g =>
-      g.length > 1
-        ? `<div class="vargroup"><div class="vg-head">${esc(g[0].phrase)}<span class="vg-style">${esc(g[0].filters)}</span></div>` +
-          `<div class="vg-cards">${g.map(card).join("")}</div></div>`
-        : card(g[0], 0)
-    ).join("");
+    for (const [k, g] of groups) {
+      if (g.length > 1) {
+        // the shell is keyed on the idea; its cards are reconciled separately
+        items.push({
+          key: "g" + k,
+          html: `<div class="vargroup"><div class="vg-head">${esc(g[0].phrase)}<span class="vg-style">${esc(g[0].filters)}</span></div><div class="vg-cards"></div></div>`,
+          children: g.map(d => ({key: "c" + d.id, html: card(d)})),
+        });
+      } else {
+        items.push({key: "c" + g[0].id, html: card(g[0])});
+      }
+    }
   } else {
-    cardsHtml = shown.map(card).join("");
+    shown.forEach(d => items.push({key: "c" + d.id, html: card(d)}));
   }
-  document.getElementById("grid").innerHTML =
-    (tab === "pending" && cardsHtml ? legend : "") + bulkbar + (cardsHtml ||
-    `<div class="empty"><span class="fleuron">❦</span>Nothing here yet — commission some ideas above.</div>`);
+  syncChildren(document.getElementById("grid"), items);
   kbHighlight();
 }
 
@@ -489,8 +546,9 @@ function renderLibrary() {
     `<span class="hint">tags appear as you make designs</span>`;
   const rows = libFiltered();
   document.getElementById("lib_count").textContent = rows.length === 1 ? "1 design" : `${rows.length} designs`;
-  document.getElementById("lib_grid").innerHTML = rows.map(libCard).join("") ||
-    `<div class="empty"><span class="fleuron">❦</span>No designs match — clear a filter or two.</div>`;
+  syncChildren(document.getElementById("lib_grid"), rows.length
+    ? rows.map(d => ({key: "c" + d.id, html: libCard(d)}))
+    : [emptyItem("No designs match — clear a filter or two.")]);
 }
 // ── Test view: raw prompts straight to the model, kept out of the pipeline ──
 async function generateTest() {
@@ -511,12 +569,12 @@ function reuse(id) {
   el.value = d.phrase;
   el.focus();
 }
-function testCard(d, i) {
+function testCard(d) {
   const generating = d.status === "queued" || d.status === "generating";
   const img = d.file
     ? `<img src="/${d.file}" loading="lazy" alt="${esc(d.phrase)}" onclick="openLightbox(${d.id})" style="cursor:zoom-in">`
     : `<div class="placeholder ${generating ? "working" : ""}">${generating ? "in press…" : (d.error ? "failed" : "no image")}</div>`;
-  return `<div class="card" style="animation-delay:${Math.min(i * 40, 400)}ms"><div class="frame">${img}</div>` +
+  return `<div class="card"><div class="frame">${img}</div>` +
     `<div class="body"><div class="filters" style="white-space:pre-wrap">${esc(d.phrase)}</div>` +
     (d.error ? `<div class="error">${esc(d.error)}</div>` : "") +
     `</div><div class="actions">` +
@@ -528,8 +586,9 @@ function renderTest() {
   if (currentView() !== "test") return;
   const n = testDesigns.length;
   document.getElementById("test_count").textContent = n === 1 ? "1 image" : `${n} images`;
-  document.getElementById("test_grid").innerHTML = testDesigns.map(testCard).join("") ||
-    `<div class="empty"><span class="fleuron">❦</span>Nothing tested yet — type a prompt above.</div>`;
+  syncChildren(document.getElementById("test_grid"), n
+    ? testDesigns.map(d => ({key: "c" + d.id, html: testCard(d)}))
+    : [emptyItem("Nothing tested yet — type a prompt above.")]);
 }
 
 let lbId = null;
@@ -600,8 +659,13 @@ document.addEventListener("keydown", (ev) => {
   if (ev.key === "ArrowRight") lbMove(1);
   if (ev.key === "ArrowLeft") lbMove(-1);
 });
+// `busy` covers user actions; `polling` stops the 3s timer from stacking a new
+// poll on top of one still in flight, which over a slow tunnel piles up requests
+// until the browser's per-host connection limit is exhausted.
+let polling = false;
 async function refresh() {
-  if (busy) return;
+  if (busy || polling) return;
+  polling = true;
   try {
     const [status, list] = await Promise.all([api("/api/status"), api("/api/designs")]);
     stat = status;
@@ -628,6 +692,7 @@ async function refresh() {
       ? "Generating on your local GPU — no daily cap."
       : `Gemini free tier: ${status.today}/${status.cap} images used today · 2 variations per idea · ~2 images/min.`;
   } catch (e) { document.getElementById("status_text").textContent = "server unreachable"; }
+  finally { polling = false; }
 }
 async function testConn(which) {
   const el = document.getElementById("test_" + which);
