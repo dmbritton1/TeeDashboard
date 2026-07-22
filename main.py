@@ -47,6 +47,7 @@ def index():
 class GenerateBody(BaseModel):
     text: str
     variations: int = 2
+    style: str = ""
 
 
 class PatchBody(BaseModel):
@@ -68,12 +69,18 @@ def generate(body: GenerateBody):
         raise HTTPException(400, "No valid lines found")
     with db.connect() as con:
         for phrase, filters in items:
+            filters = pipeline.style_filters(body.style, filters)
             for _ in range(body.variations):
                 con.execute(
                     "INSERT INTO designs (phrase, filters, status) VALUES (?, ?, 'queued')",
                     (phrase, filters),
                 )
     return {"queued": len(items) * body.variations}
+
+
+@app.get("/api/styles")
+def list_styles():
+    return {group: list(labels) for group, labels in pipeline.STYLE_GROUPS.items()}
 
 
 @app.get("/api/designs")
@@ -281,7 +288,7 @@ def export_csv():
         w.writerow(list(r))
     return Response(
         content=buf.getvalue(), media_type="text/csv",
-        headers={"Content-Disposition": 'attachment; filename="atelier-designs.csv"'},
+        headers={"Content-Disposition": 'attachment; filename="compound-designs.csv"'},
     )
 
 
@@ -296,7 +303,7 @@ def backup():
             full = os.path.join(ddir, name)
             if os.path.isfile(full):
                 z.write(full, "designs/" + name)
-    fname = "atelier-backup-%s.zip" % datetime.date.today().isoformat()
+    fname = "compound-backup-%s.zip" % datetime.date.today().isoformat()
     return FileResponse(path, filename=fname, media_type="application/zip",
                         background=BackgroundTask(os.remove, path))
 

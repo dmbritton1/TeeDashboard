@@ -167,7 +167,8 @@ async function queueItems(items) {
   }
   if (!items.length) { flash("Nothing new to queue"); return; }
   const text = items.map(([p, f]) => f ? `${p} | ${f}` : p).join("\n");
-  await api("/api/generate", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text})});
+  const style = document.getElementById("style_select").value;
+  await api("/api/generate", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text, style})});
   flash(`Queued ${items.length} idea${items.length === 1 ? "" : "s"} (2 variations each)`);
   refresh();
 }
@@ -516,7 +517,7 @@ async function refresh() {
     document.getElementById("key_state").textContent = status.has_key ? "key saved ✓" : "no key saved";
     render();
     const pending = designs.filter(d => d.status === "pending").length;
-    document.title = (pending ? `(${pending}) ` : "") + "The Atelier — T-Shirt Design House";
+    document.title = (pending ? `(${pending}) ` : "") + "Compound";
     document.getElementById("badge_pending").textContent = pending || "";
     document.getElementById("gen_info").textContent = status.local
       ? "Generating on your local GPU — no daily cap."
@@ -566,6 +567,24 @@ async function copyPrompt() {
   try { await navigator.clipboard.writeText(el.value); flash("Prompt copied"); }
   catch (e) { el.focus(); el.select(); flash("Press ⌘C to copy"); }
 }
+async function loadStyles() {
+  try {
+    const groups = await api("/api/styles");
+    const sel = document.getElementById("style_select");
+    for (const [group, labels] of Object.entries(groups)) {
+      const og = document.createElement("optgroup");
+      og.label = group;
+      for (const label of labels) {
+        const opt = document.createElement("option");
+        opt.value = opt.textContent = label;
+        og.appendChild(opt);
+      }
+      sel.appendChild(og);
+    }
+  } catch (e) {}
+}
+loadStyles();
+
 loadPrompt();
 
 showView();

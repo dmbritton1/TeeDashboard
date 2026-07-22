@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>The Atelier — T-Shirt Design House</title>
+<title>Compound</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Italiana&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -44,7 +44,7 @@
   <aside>
     <div class="brand">
       <p class="eyebrow">T-shirt design house</p>
-      <h1>The Atelier</h1>
+      <h1>Compound</h1>
       <div class="rule" aria-hidden="true"><span class="gem"></span></div>
     </div>
     <div class="nav-label">Menu</div>
@@ -83,6 +83,11 @@
       <section class="panel">
         <div class="panel-label">Commission ideas — one per line: phrase | style</div>
         <textarea id="input" placeholder="funny fishing shirt | vintage, distressed, black shirt&#10;plant mom | retro 70s, floral"></textarea>
+        <div class="row">
+          <label for="style_select" style="min-width:0">Art style</label>
+          <select id="style_select"><option value="">None — use my own style words</option></select>
+          <span class="hint">Applied to every line in this batch, on top of any per-line style</span>
+        </div>
         <div class="row">
           <button class="gilt" onclick="generate()">Generate designs</button>
           <span class="hint">2 variations per line · paced ~2/min to stay inside the free tier</span>
