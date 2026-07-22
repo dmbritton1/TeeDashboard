@@ -1,4 +1,4 @@
-const VIEWS = ["dashboard", "add", "library", "settings"];
+const VIEWS = ["dashboard", "add", "library", "test", "settings"];
 function currentView() {
   const h = location.hash.replace("#", "");
   return VIEWS.includes(h) ? h : "dashboard";
@@ -101,11 +101,40 @@ const STAGES = [
   { id: "failed",    name: "Failed" },
   { id: "rejected",  name: "Rejected" },
 ];
-let tab = "pending", designs = [];
+let tab = "pending", designs = [], testDesigns = [];
 let stat = {}, busy = 0;
 
+// One prompt per burst: bulk approve fires many calls at once, and without this
+// every one of them would pop its own dialog.
+let codeAsk = null;
+function askForCode() {
+  if (!codeAsk) {
+    const entered = prompt("Enter the access code:");
+    if (entered) localStorage.setItem("accessCode", entered);
+    codeAsk = Promise.resolve(entered);
+    setTimeout(() => { codeAsk = null; }, 0);  // release once the burst drains
+  }
+  return codeAsk;
+}
+
+// Reads are never gated; only mutating calls can come back 401, so the prompt
+// can't fire from the 3s refresh loop.
 async function api(path, opts) {
-  const r = await fetch(path, opts);
+  opts = Object.assign({}, opts);
+  const withCode = code => Object.assign({}, opts.headers, {"X-Access-Code": code});
+  const sent = localStorage.getItem("accessCode");
+  if (sent) opts.headers = withCode(sent);
+  let r = await fetch(path, opts);
+  if (r.status === 401) {
+    // prompt() blocks, so a sibling call that 401s slightly later already finds
+    // the fresh code in storage and retries without asking again
+    let code = localStorage.getItem("accessCode");
+    if (code === sent) code = await askForCode();
+    if (code && code !== sent) {
+      opts.headers = withCode(code);
+      r = await fetch(path, opts);
+    }
+  }
   if (!r.ok) {
     let detail = r.statusText;
     try { detail = (await r.json()).detail || detail; } catch (e) {}
@@ -195,16 +224,28 @@ document.getElementById("csv_file").addEventListener("change", async (ev) => {
   ev.target.value = "";
 });
 async function saveSettings() {
+  const code = document.getElementById("access_code").value;
   const body = {
     gemini_api_key: document.getElementById("gemini_key").value,
     printify_api_token: document.getElementById("printify_token").value,
     printify_shop_id: document.getElementById("printify_shop").value,
+    access_code: code,
   };
-  try { await api("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)}); }
+  try {
+    await api("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+    // remember the code we just set, so this browser isn't locked out by it
+    if (code.trim()) localStorage.setItem("accessCode", code.trim());
+    flash("Settings saved");
+  }
   catch (e) { alert(e.message); }
   document.getElementById("gemini_key").value = "";
   document.getElementById("printify_token").value = "";
+  document.getElementById("access_code").value = "";
   refresh();
+}
+function forgetCode() {
+  localStorage.removeItem("accessCode");
+  flash("Access code cleared on this device");
 }
 async function removeDesign(btn, id, verb) {
   if (verb === "delete" && !confirm("Delete this design and its image files permanently?")) return;
@@ -274,6 +315,7 @@ function card(d, i) {
 function render() {
   renderDashboard();
   renderLibrary();
+  renderTest();
   const counts = {};
   designs.forEach(d => {
     const t = d.status === "generating" ? "queued" : d.status;
@@ -450,12 +492,57 @@ function renderLibrary() {
   document.getElementById("lib_grid").innerHTML = rows.map(libCard).join("") ||
     `<div class="empty"><span class="fleuron">❦</span>No designs match — clear a filter or two.</div>`;
 }
+// ── Test view: raw prompts straight to the model, kept out of the pipeline ──
+async function generateTest() {
+  const text = document.getElementById("testInput").value.trim();
+  if (!text) return;
+  const hint = document.getElementById("testHint");
+  try {
+    await api("/api/test", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text})});
+    // the prompt stays put so you can tweak a word and fire again
+    hint.textContent = "queued ✓ · a few minutes per image on this GPU";
+  } catch (e) { alert(e.message); }
+  refresh();
+}
+function reuse(id) {
+  const d = testDesigns.find(x => x.id === id);
+  if (!d) return;
+  const el = document.getElementById("testInput");
+  el.value = d.phrase;
+  el.focus();
+}
+function testCard(d, i) {
+  const generating = d.status === "queued" || d.status === "generating";
+  const img = d.file
+    ? `<img src="/${d.file}" loading="lazy" alt="${esc(d.phrase)}" onclick="openLightbox(${d.id})" style="cursor:zoom-in">`
+    : `<div class="placeholder ${generating ? "working" : ""}">${generating ? "in press…" : (d.error ? "failed" : "no image")}</div>`;
+  return `<div class="card" style="animation-delay:${Math.min(i * 40, 400)}ms"><div class="frame">${img}</div>` +
+    `<div class="body"><div class="filters" style="white-space:pre-wrap">${esc(d.phrase)}</div>` +
+    (d.error ? `<div class="error">${esc(d.error)}</div>` : "") +
+    `</div><div class="actions">` +
+    `<button onclick="reuse(${d.id})">↻ Reuse</button>` +
+    `<button onclick="removeDesign(this,${d.id},'delete')">🗑 Delete</button>` +
+    `</div></div>`;
+}
+function renderTest() {
+  if (currentView() !== "test") return;
+  const n = testDesigns.length;
+  document.getElementById("test_count").textContent = n === 1 ? "1 image" : `${n} images`;
+  document.getElementById("test_grid").innerHTML = testDesigns.map(testCard).join("") ||
+    `<div class="empty"><span class="fleuron">❦</span>Nothing tested yet — type a prompt above.</div>`;
+}
+
 let lbId = null;
 function openLightbox(id) { lbId = id; renderLightbox(); }
 function closeLightbox() { lbId = null; document.getElementById("lightbox").hidden = true; }
+function findDesign(id) {
+  return designs.find(x => x.id === id) || testDesigns.find(x => x.id === id);
+}
 function lbMove(dir) {
-  const rows = libFiltered().filter(d => d.file);
-  const i = rows.findIndex(d => d.id === lbId);
+  const d = findDesign(lbId);
+  // step through whichever collection the open image belongs to
+  const rows = (d && d.test ? testDesigns : libFiltered()).filter(x => x.file);
+  const i = rows.findIndex(x => x.id === lbId);
   const next = rows[i + dir];
   if (next) { lbId = next.id; renderLightbox(); }
 }
@@ -470,9 +557,21 @@ async function saveTags(id) {
   } catch (e) { alert(e.message); }
 }
 function renderLightbox() {
-  const d = designs.find(x => x.id === lbId);
+  const d = findDesign(lbId);
   if (!d) { closeLightbox(); return; }
   const st = d.status === "generating" ? "queued" : d.status;
+  if (d.test) {
+    // scratch images have no review state, tags, or rating — just the prompt
+    document.getElementById("lightbox_inner").innerHTML =
+      `<div>${d.file ? `<img src="/${d.file}" alt="${esc(d.phrase)}">` : `<div class="placeholder">no image</div>`}</div>` +
+      `<div><h3>Test image</h3>` +
+      `<div class="lb-row"><span class="status-chip">${st}</span> · ${(d.created_at || "").slice(0, 10)}</div>` +
+      `<div class="lb-row" style="white-space:pre-wrap;font:12px var(--mono)">${esc(d.phrase)}</div>` +
+      (d.error ? `<div class="lb-row" style="color:var(--clay)">${esc(d.error)}</div>` : "") +
+      `<div class="lb-row"><button onclick="reuse(${d.id});closeLightbox()">↻ Reuse prompt</button></div></div>`;
+    document.getElementById("lightbox").hidden = false;
+    return;
+  }
   const actions = {
     pending: `<button class="gilt" onclick="act(this,${d.id},'approve');closeLightbox()">✓ Approve</button>
               <button onclick="act(this,${d.id},'reject');closeLightbox()">✕ Reject</button>`,
@@ -506,7 +605,10 @@ async function refresh() {
   try {
     const [status, list] = await Promise.all([api("/api/status"), api("/api/designs")]);
     stat = status;
-    designs = list;
+    // scratch images are a separate world: they must not reach the dashboard,
+    // charts, library, counts, or keyboard review
+    designs = list.filter(d => !d.test);
+    testDesigns = list.filter(d => d.test);
     [...selected].forEach(id => { const d = designs.find(x => x.id === id); if (!d || d.status !== "pending") selected.delete(id); });
     document.getElementById("status_text").textContent = status.local
       ? `local GPU · ${status.queued} in press`
@@ -515,10 +617,13 @@ async function refresh() {
         (status.paused ? " · daily cap reached — resumes tomorrow" : "");
     document.querySelector("#statusbar .dot").classList.toggle("live", status.queued > 0);
     document.getElementById("key_state").textContent = status.has_key ? "key saved ✓" : "no key saved";
+    document.getElementById("code_state").textContent =
+      status.access_code ? "code set ✓ — link is gated" : "no code — anyone with the link can queue";
     render();
     const pending = designs.filter(d => d.status === "pending").length;
     document.title = (pending ? `(${pending}) ` : "") + "Compound";
     document.getElementById("badge_pending").textContent = pending || "";
+    document.getElementById("badge_test").textContent = testDesigns.length || "";
     document.getElementById("gen_info").textContent = status.local
       ? "Generating on your local GPU — no daily cap."
       : `Gemini free tier: ${status.today}/${status.cap} images used today · 2 variations per idea · ~2 images/min.`;

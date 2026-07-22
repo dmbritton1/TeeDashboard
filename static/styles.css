@@ -170,7 +170,7 @@ input[type=password], input[type=text] {
 label { font-size: 13px; color: var(--stone); min-width: 108px; }
 
 /* cards — framed prints on dark stone */
-#grid, #lib_grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 18px; }
+#grid, #lib_grid, #test_grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 18px; }
 .card {
   position: relative;
   background: linear-gradient(180deg, var(--slab), var(--slab-deep));
@@ -290,7 +290,7 @@ select, input[type=date] {
   .side-foot { border-top: 1px solid var(--mist); padding: 10px 16px; margin: 0; }
   #statusbar { justify-content: center; }
   main { padding: 22px 14px 60px; }
-  #grid, #lib_grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+  #grid, #lib_grid, #test_grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
   input[type=password], input[type=text] { width: 100%; }
 }
 @media (prefers-reduced-motion: reduce) {

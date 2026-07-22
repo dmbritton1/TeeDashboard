@@ -52,6 +52,7 @@
       <a class="navlink" data-view="dashboard" href="#dashboard"><span>Dashboard</span><span class="badge" id="badge_pending"></span></a>
       <a class="navlink" data-view="add" href="#add"><span>Add designs</span></a>
       <a class="navlink" data-view="library" href="#library"><span>Library</span></a>
+      <a class="navlink" data-view="test" href="#test"><span>Test</span><span class="badge" id="badge_test"></span></a>
       <a class="navlink" data-view="settings" href="#settings"><span>Settings</span></a>
     </nav>
     <div class="side-foot">
@@ -128,6 +129,19 @@
       <div id="lib_grid"></div>
     </section>
 
+    <section id="view-test" hidden>
+      <div class="workhead"><h2>Test</h2><span id="test_count"></span></div>
+      <section class="panel">
+        <div class="panel-label">Raw prompt — sent to the model exactly as written</div>
+        <textarea id="testInput" placeholder="a red dragon coiled around a sword, vintage tattoo style"></textarea>
+        <div class="row">
+          <button class="gilt" onclick="generateTest()">Generate image</button>
+          <span class="hint" id="testHint">no t-shirt template · jumps the queue · never enters the pipeline</span>
+        </div>
+      </section>
+      <div id="test_grid"></div>
+    </section>
+
     <section id="view-settings" hidden>
       <section class="panel">
         <div class="panel-label">Connections</div>
@@ -150,6 +164,19 @@
         <div class="row">
           <button onclick="testConn('printify')">Test Printify</button>
           <span class="hint" id="test_printify"></span>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-label">Shared link</div>
+        <div class="row" style="margin-top:0">
+          <label>Access code</label>
+          <input type="password" id="access_code" placeholder="set a code to gate the shared link">
+          <button onclick="saveSettings()">Save</button>
+          <span class="hint" id="code_state"></span>
+        </div>
+        <div class="row">
+          <button onclick="forgetCode()">Forget code on this device</button>
+          <span class="hint">anyone with the link can look, but only people with the code can queue or review</span>
         </div>
       </section>
       <section class="panel">

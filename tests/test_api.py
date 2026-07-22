@@ -92,6 +92,14 @@ def test_delete_guards_status(tmp_path, monkeypatch):
     assert e.value.status_code == 409
 
 
+def test_delete_finished_test_image_bypasses_status_guard(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    did = insert("pending", test=1)  # a generated scratch image lands in 'pending'
+    main.delete_design(did)
+    with db.connect() as con:
+        assert con.execute("SELECT COUNT(*) c FROM designs").fetchone()["c"] == 0
+
+
 def test_delete_missing_404(tmp_path, monkeypatch):
     main = load_main(tmp_path, monkeypatch)
     with pytest.raises(HTTPException) as e:
