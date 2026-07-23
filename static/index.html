@@ -153,6 +153,13 @@
     <section id="view-settings" hidden>
       <section class="panel">
         <div class="panel-label">Connections</div>
+        <div class="row" style="margin-top:0">
+          <label>Gemini API key</label>
+          <input type="password" id="gemini_key" placeholder="for Gemma prompt refinement">
+          <button onclick="testConn('gemini')">Test</button>
+          <span class="hint" id="key_state"></span>
+          <span class="hint" id="test_gemini"></span>
+        </div>
         <div class="row">
           <label>Printify token</label>
           <input type="password" id="printify_token" placeholder="optional, for publishing">

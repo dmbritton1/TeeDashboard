@@ -77,6 +77,7 @@ class TestBody(BaseModel):
 
 
 class SettingsBody(BaseModel):
+    gemini_api_key: str = ""
     printify_api_token: str = ""
     printify_shop_id: str = ""
     access_code: str = ""
@@ -281,7 +282,7 @@ def publish(design_id: int, _gate: None = Depends(require_access_code)):
 
 @app.get("/api/settings")
 def get_settings():
-    keys = ("printify_api_token", "printify_shop_id")
+    keys = ("gemini_api_key", "printify_api_token", "printify_shop_id")
     out = {k: bool(db.get_setting(k)) for k in keys}
     out["prompt_template"] = db.get_setting("prompt_template") or DEFAULT_PROMPT
     out["refine_prompt"] = db.get_setting("refine_prompt") or refine.DEFAULT_REFINE_PROMPT
@@ -294,6 +295,23 @@ def save_settings(body: SettingsBody, _gate: None = Depends(require_access_code)
         if v.strip():
             db.set_setting(k, v.strip())
     return {"ok": True}
+
+
+@app.post("/api/test/gemini")
+def test_gemini():
+    key = db.get_setting("gemini_api_key")
+    if not key:
+        return {"ok": False, "message": "No Gemini key saved yet"}
+    try:
+        r = requests.get(
+            "https://generativelanguage.googleapis.com/v1beta/models",
+            headers={"x-goog-api-key": key}, timeout=15,
+        )
+    except Exception as e:
+        return {"ok": False, "message": "Couldn't reach Google: %s" % e}
+    if r.status_code == 200:
+        return {"ok": True, "message": "Gemini key works"}
+    return {"ok": False, "message": "Google says: %s" % r.text[:300]}
 
 
 @app.post("/api/test/printify")

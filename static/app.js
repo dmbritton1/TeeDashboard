@@ -230,6 +230,7 @@ document.getElementById("csv_file").addEventListener("change", async (ev) => {
 async function saveSettings() {
   const code = document.getElementById("access_code").value;
   const body = {
+    gemini_api_key: document.getElementById("gemini_key").value,
     printify_api_token: document.getElementById("printify_token").value,
     printify_shop_id: document.getElementById("printify_shop").value,
     access_code: code,
@@ -238,9 +239,12 @@ async function saveSettings() {
     await api("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
     // remember the code we just set, so this browser isn't locked out by it
     if (code.trim()) localStorage.setItem("accessCode", code.trim());
+    if (body.gemini_api_key.trim())
+      document.getElementById("key_state").textContent = "key saved ✓";
     flash("Settings saved");
   }
   catch (e) { alert(e.message); }
+  document.getElementById("gemini_key").value = "";
   document.getElementById("printify_token").value = "";
   document.getElementById("access_code").value = "";
   refresh();
@@ -742,6 +746,7 @@ async function loadPrompt() {
     const s = await api("/api/settings");
     document.getElementById("prompt_box").value = s.prompt_template;
     document.getElementById("refine_box").value = s.refine_prompt || "";
+    document.getElementById("key_state").textContent = s.gemini_api_key ? "key saved ✓" : "no key saved";
     promptLoaded = true;
   } catch (e) {}
 }

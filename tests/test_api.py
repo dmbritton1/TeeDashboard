@@ -130,6 +130,26 @@ def test_settings_roundtrips_prompt_template(tmp_path, monkeypatch):
     assert main.get_settings()["prompt_template"] == "my prompt"
 
 
+def test_settings_roundtrips_gemini_key(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    assert main.get_settings()["gemini_api_key"] is False
+    main.save_settings(main.SettingsBody(gemini_api_key="secret-key"))
+    assert main.get_settings()["gemini_api_key"] is True   # reported as a bool, never echoed
+    assert db.get_setting("gemini_api_key") == "secret-key"
+
+
+def test_test_gemini_no_key(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    assert main.test_gemini() == {"ok": False, "message": "No Gemini key saved yet"}
+
+
+def test_test_gemini_ok(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    db.set_setting("gemini_api_key", "k")
+    monkeypatch.setattr(main.requests, "get", lambda *a, **kw: FakeResp(200))
+    assert main.test_gemini()["ok"] is True
+
+
 def test_unreview_guards_status(tmp_path, monkeypatch):
     main = load_main(tmp_path, monkeypatch)
     did = insert("queued")
