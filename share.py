@@ -43,14 +43,14 @@ def send_link(url):
         print("no email sent - set %s in .env" % ", ".join(missing))
         return
 
-    msg = EmailMessage()
-    msg["Subject"] = "Dashboard is up: %s" % url
-    msg["From"] = user
-    msg["To"] = to
-    msg.set_content(url)
     try:
+        msg = EmailMessage()
+        msg["Subject"] = "Dashboard is up: %s" % url
+        msg["From"] = user
+        msg["To"] = to
+        msg.set_content(url)
         # Google displays app passwords in four space-separated groups
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15) as smtp:
             smtp.login(user, password.replace(" ", ""))
             smtp.send_message(msg)
     except smtplib.SMTPAuthenticationError:
@@ -64,11 +64,23 @@ def send_link(url):
         print("emailed the link to %s" % to)
 
 
+def relay(lines, send):
+    """Print each line of cloudflared output; call send once, on the first URL."""
+    sent = False
+    for line in lines:
+        print(line, end="")
+        if not sent:
+            url = extract_url(line)
+            if url:
+                sent = True  # cloudflared echoes the URL more than once
+                send(url)
+
+
 def main():
     """Run uvicorn and cloudflared together; email the first tunnel URL seen."""
     server = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "main:app",
-         "--host", "0.0.0.0", "--port", str(PORT)]
+         "--host", "127.0.0.1", "--port", str(PORT)]
     )
     tunnel = None
     try:
@@ -81,14 +93,17 @@ def main():
             text=True,
             bufsize=1,
         )
-        sent = False
-        for line in tunnel.stdout:
-            print(line, end="")
-            if not sent:
-                url = extract_url(line)
-                if url:
-                    sent = True  # cloudflared echoes the URL more than once
-                    send_link(url)
+
+        def send_and_check(url):
+            if server.poll() is not None:
+                print(
+                    "warning: the server process has already exited (port %d "
+                    "may already be in use) - the link below likely won't work"
+                    % PORT
+                )
+            send_link(url)
+
+        relay(tunnel.stdout, send_and_check)
     except FileNotFoundError:
         print(
             "cloudflared not found - install it from https://developers."

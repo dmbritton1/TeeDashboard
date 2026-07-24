@@ -1,4 +1,6 @@
 """Unit tests for the tunnel-link notifier. No subprocesses, no live Gmail."""
+import smtplib
+
 import share
 
 # a real line from cloudflared's startup banner
@@ -91,3 +93,34 @@ def test_send_link_swallows_smtp_failures(monkeypatch):
     monkeypatch.setattr(share.smtplib, "SMTP_SSL", boom)
 
     share.send_link(URL)  # must return normally, not raise
+
+
+def test_send_link_swallows_bad_app_password(monkeypatch):
+    _configure(monkeypatch)
+    stub = StubSMTP()
+
+    def bad_login(user, password):
+        raise smtplib.SMTPAuthenticationError(535, b"5.7.8 Username and Password not accepted")
+
+    stub.login = bad_login
+    monkeypatch.setattr(share.smtplib, "SMTP_SSL", lambda *a, **k: stub)
+
+    share.send_link(URL)  # must return normally, not raise
+
+
+def test_relay_sends_once_when_url_repeats():
+    sent = []
+    lines = [BANNER, NOISE, BANNER]
+
+    share.relay(lines, sent.append)
+
+    assert sent == [URL]
+
+
+def test_relay_never_sends_without_a_url():
+    sent = []
+    lines = [NOISE, NOISE]
+
+    share.relay(lines, sent.append)
+
+    assert sent == []
