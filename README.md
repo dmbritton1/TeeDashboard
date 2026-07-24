@@ -83,26 +83,37 @@ can open it in a browser and queue images. Generation still happens locally.
 
 1. Set an **Access code** in the dashboard settings (gates image generation; a
    leaked link alone can't queue work). Without a code the link is open.
-2. Run the server bound to all interfaces:
+2. Install `cloudflared` from Cloudflare's site.
+3. Run:
 
-       .venv\Scripts\uvicorn main:app --host 0.0.0.0 --port 8000
+       .venv\Scripts\python share.py
 
-3. In another terminal, start a Cloudflare Quick Tunnel (install `cloudflared`
-   first from Cloudflare's site):
+That starts the server, opens the tunnel, and prints a
+`https://<random>.trycloudflare.com` URL. Share it. Anyone who opens it gets the
+dashboard and, on first generate, is asked for the access code. Ctrl-C stops
+both the server and the tunnel.
 
-       cloudflared tunnel --url http://127.0.0.1:8000
+### Email the link automatically
 
-   It prints a `https://<random>.trycloudflare.com` URL. Share it. Anyone who
-   opens it gets the dashboard and, on first generate, is asked for the access
-   code.
+`share.py` can mail the URL to whoever needs it, since the address changes every
+restart. Add three lines to `.env` on this machine:
 
-   Use `127.0.0.1`, not `localhost`. On Windows `localhost` resolves to the IPv6
-   address `::1` first, but uvicorn listens on IPv4 only, so cloudflared dials
-   `[::1]:8000` and the connection is refused:
+    GMAIL_USER=throwaway@gmail.com
+    GMAIL_APP_PASSWORD=abcd efgh ijkl mnop
+    NOTIFY_EMAIL=where-it-should-land@gmail.com
 
-       ERR Request failed error="Unable to reach the origin service ...
-           dial tcp [::1]:8000: connectex: No connection could be made ..."
+`GMAIL_USER` is the account that sends; `NOTIFY_EMAIL` is where it lands. They
+are different accounts on purpose — the sending account's password sits in a
+plaintext file, so use a throwaway, not an account you care about.
 
-Notes: the tunnel URL changes each time you restart `cloudflared`. Generation is
-serialized on one GPU, so images queue (~a few minutes each); the queue is capped
-at 30 in-flight to prevent flooding.
+The app password is a 16-character key from the sending account's Google
+settings (Security → App passwords). It only exists once **2-Step Verification
+is turned on** for that account; without 2FA the option is not shown at all.
+Google shows the password once, in four space-separated groups — paste it with
+or without the spaces, both work.
+
+Without these variables `share.py` runs normally and just prints the link.
+
+Notes: the tunnel URL changes each time you restart. Generation is serialized on
+one GPU, so images queue (~a few minutes each); the queue is capped at 30
+in-flight to prevent flooding.

@@ -62,3 +62,45 @@ def send_link(url):
         print("email failed (%s) - the link above still works" % e)
     else:
         print("emailed the link to %s" % to)
+
+
+def main():
+    """Run uvicorn and cloudflared together; email the first tunnel URL seen."""
+    server = subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "main:app",
+         "--host", "0.0.0.0", "--port", str(PORT)]
+    )
+    tunnel = None
+    try:
+        # 127.0.0.1, not localhost: on Windows localhost resolves to ::1 first
+        # and uvicorn listens on IPv4 only, so cloudflared gets connection refused
+        tunnel = subprocess.Popen(
+            ["cloudflared", "tunnel", "--url", "http://127.0.0.1:%d" % PORT],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        sent = False
+        for line in tunnel.stdout:
+            print(line, end="")
+            if not sent:
+                url = extract_url(line)
+                if url:
+                    sent = True  # cloudflared echoes the URL more than once
+                    send_link(url)
+    except FileNotFoundError:
+        print(
+            "cloudflared not found - install it from https://developers."
+            "cloudflare.com/cloudflare-one/connections/connect-networks/downloads/"
+        )
+    except KeyboardInterrupt:
+        pass
+    finally:
+        for process in (tunnel, server):
+            if process:
+                process.terminate()
+
+
+if __name__ == "__main__":
+    main()
