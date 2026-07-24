@@ -103,11 +103,11 @@ URL is always printed locally, so the terminal is the fallback path.
 
 | Condition | Behavior |
 |---|---|
-| `cloudflared` not on PATH | `FileNotFoundError` → message naming the download page, exit non-zero |
+| `cloudflared` not on PATH | `FileNotFoundError` → message naming the download page, then normal shutdown |
 | Any env var missing | Warning naming the missing variable; server and tunnel run normally |
 | Gmail rejects the login | `SMTPAuthenticationError` → message pointing at the app password and 2FA; tunnel unaffected |
 | Any other send failure | Warning printed; tunnel unaffected |
-| Port 8000 already in use | uvicorn reports it on the shared output stream |
+| Port 8000 already in use | uvicorn inherits the console, so its own error is visible |
 | Ctrl-C | `finally` terminates both children |
 
 ## Testing
