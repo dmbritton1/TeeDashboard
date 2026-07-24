@@ -275,6 +275,16 @@ function forgetCode() {
   localStorage.removeItem("accessCode");
   flash("Access code cleared on this device");
 }
+async function saveModel() {
+  const el = document.getElementById("model_select");
+  const state = document.getElementById("model_state");
+  try {
+    await api("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({image_model: el.value})});
+    // the worker loads the model lazily, so the switch lands on the next image
+    state.textContent = "saved — applies to the next image (first run downloads weights)";
+  } catch (e) { state.textContent = "✗ " + e.message; }
+}
 async function removeDesign(btn, id, verb) {
   if (verb === "delete" && !confirm("Delete this design and its image files permanently?")) return;
   btn.disabled = true;
@@ -365,7 +375,7 @@ function emptyItem(msg) {
 }
 
 // Only the actively-generating design shows a bar; it eases forward between the
-// 3s polls, then snaps to the real value as each FLUX step lands. The card html
+// 3s polls, then snaps to the real value as each denoising step lands. The card html
 // embeds the real progress (stable signature for syncChildren); creepTick drives
 // the between-poll drift directly on the DOM node.
 let creepId = null, creepVal = 0;
@@ -408,7 +418,7 @@ function card(d) {
     (d.error ? `<div class="error">${esc(d.error)}</div>` : "") +
     `</div><div class="actions">${buttons}</div></div>`;
 }
-// The exact text sent to FLUX. A rich sentence means Gemma refined it; no stored
+// The exact text sent to the image model. A rich sentence means Gemma refined it; no stored
 // prompt means the plain t-shirt template was used (the worker doesn't save that).
 function promptLine(d) {
   if (d.prompt) return `<details class="prompt"><summary>prompt</summary>${esc(d.prompt)}</details>`;
@@ -778,6 +788,10 @@ async function loadPrompt() {
     document.getElementById("prompt_box").value = s.prompt_template;
     document.getElementById("refine_box").value = s.refine_prompt || "";
     document.getElementById("key_state").textContent = s.gemini_api_key ? "key saved ✓" : "no key saved";
+    const sel = document.getElementById("model_select");
+    const LABELS = {zimage: "Z-Image-Turbo (8-bit)"};
+    sel.innerHTML = (s.image_models || []).map(m =>
+      `<option value="${m}" ${m === s.image_model ? "selected" : ""}>${LABELS[m] || m}</option>`).join("");
     promptLoaded = true;
   } catch (e) {}
 }

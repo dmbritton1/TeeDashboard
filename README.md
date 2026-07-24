@@ -38,13 +38,12 @@ One design per line in the big textbox:
 Left of `|` = the design concept. Right = optional comma-separated style
 filters. 2 variations are generated per line.
 
-## Local generation (machine with an NVIDIA GPU)
+## Local generation (machine with a GPU)
 
-On a computer with an NVIDIA graphics card (8GB+ VRAM; 32GB+ system RAM
-recommended on smaller cards), the app generates images locally with
-FLUX.1-schnell instead of calling Gemini - no API key, no daily cap, no
-per-image cost. Cards with 20GB+ VRAM run fast; smaller cards work but take
-a few minutes per image. Setup on that machine:
+On a computer with a CUDA or ROCm GPU (10GB+ VRAM; 32GB+ system RAM
+recommended), the app generates images locally with Z-Image-Turbo - no API
+key, no daily cap, no per-image cost. Fast cards finish in seconds; smaller
+ones take a few minutes per image. Setup on that machine:
 
     git clone https://github.com/dmbritton1/TeeDashboard.git
     cd TeeDashboard
@@ -53,13 +52,18 @@ a few minutes per image. Setup on that machine:
     .venv/bin/pip install -r requirements-local.txt
 
 On Windows, use `.venv\Scripts\pip` and `.venv\Scripts\uvicorn` instead of
-`.venv/bin/...`, and install the CUDA build of torch first:
+`.venv/bin/...`, and install a GPU build of torch first. NVIDIA:
 
     .venv\Scripts\pip install torch --index-url https://download.pytorch.org/whl/cu128
 
+AMD (ROCm on Windows, e.g. an RX 6700 - install torchvision from the same
+index or torchvision ops will fail to resolve against this torch):
+
+    .venv\Scripts\pip install torch torchvision --index-url https://rocm.nightlies.amd.com/v2-staging/gfx103X-dgpu/
+
 Then run the server as usual. The GPU is detected automatically (the status
 bar shows "local GPU"), and the first generation downloads the model
-(~20GB, one time). To use the dashboard from another computer, install
+(~15GB, one time: a 7.2GB 8-bit transformer, an 8GB text encoder, and the VAE). To use the dashboard from another computer, install
 Tailscale (free) on both machines and open `http://<machine-name>:8000`.
 
 Start the server so other computers can reach it:

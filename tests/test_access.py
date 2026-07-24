@@ -2,9 +2,15 @@ import os
 import tempfile
 
 import db
+import worker
 
 # point the app at a throwaway DB before main's import-time db.init() runs
 db.DB_PATH = os.path.join(tempfile.mkdtemp(), "api.db")
+# ...and stop main's import-time worker.start() from spawning a real generation
+# thread. The queue-cap tests below insert 'queued' rows, which a live worker
+# picks up and tries to render - loading the whole image model into RAM and
+# getting the test process OOM-killed.
+worker.start = lambda: None
 
 from fastapi.testclient import TestClient  # noqa: E402
 

@@ -130,6 +130,32 @@ def test_settings_roundtrips_prompt_template(tmp_path, monkeypatch):
     assert main.get_settings()["prompt_template"] == "my prompt"
 
 
+def test_settings_roundtrips_image_model(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    out = main.get_settings()
+    assert out["image_model"] == "zimage"        # unset -> default
+    assert "zimage" in out["image_models"]
+    main.save_settings(main.SettingsBody(image_model="zimage"))
+    assert main.get_settings()["image_model"] == "zimage"
+
+
+def test_unknown_image_model_falls_back_to_default(tmp_path, monkeypatch):
+    load_main(tmp_path, monkeypatch)
+    import pipeline
+    db.set_setting("image_model", "not-a-real-model")
+    assert pipeline.current_model() == "zimage"  # never hand the worker a bad name
+
+
+def test_flux_is_gone(tmp_path, monkeypatch):
+    """FLUX was removed; a stored 'flux' setting must not resurrect it."""
+    load_main(tmp_path, monkeypatch)
+    import pipeline
+    assert "flux" not in pipeline.MODELS
+    assert not hasattr(pipeline, "_build_flux")
+    db.set_setting("image_model", "flux")        # left over from before the switch
+    assert pipeline.current_model() == "zimage"
+
+
 def test_settings_roundtrips_gemini_key(tmp_path, monkeypatch):
     main = load_main(tmp_path, monkeypatch)
     assert main.get_settings()["gemini_api_key"] is False

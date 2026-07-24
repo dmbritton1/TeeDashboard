@@ -200,6 +200,11 @@
       </section>
       <section class="panel">
         <div class="panel-label">Generation</div>
+        <div class="row" style="margin-top:0">
+          <label for="model_select">Image model</label>
+          <select id="model_select" onchange="saveModel()"></select>
+          <span class="hint" id="model_state"></span>
+        </div>
         <div class="hint" id="gen_info">loading…</div>
       </section>
     </section>

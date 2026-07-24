@@ -1,4 +1,9 @@
+import pytest
+
+import pipeline
 from pipeline import parse_input, build_prompt, step_progress
+
+torch = pytest.importorskip("torch")
 
 
 def test_parse_explodes_one_row_per_filter_term():
@@ -41,3 +46,60 @@ def test_step_progress_monotonic_and_below_100():
     pct = [step_progress(i, 4) for i in range(4)]
     assert pct == sorted(pct)
     assert max(pct) < 100
+
+
+# _build_zimage can't run without a GPU and 15GB of weights, but the offload/tiling
+# calls it makes are pure API surface — and getting one wrong is silent until an
+# image is actually generated. It shipped calling pipe.enable_vae_tiling(), which
+# ZImagePipeline does not have. These pin the two methods the builder depends on.
+diffusers = pytest.importorskip("diffusers")
+
+
+def test_vae_exposes_the_tiling_method_the_builder_calls():
+    # gfx103x MIOpen has no kernel for a full 1024 decode; without tiling the GPU faults
+    assert hasattr(diffusers.AutoencoderKL, "enable_tiling")
+
+
+def test_zimage_pipeline_exposes_model_cpu_offload():
+    assert hasattr(diffusers.ZImagePipeline, "enable_model_cpu_offload")
+
+
+def _mock_zimage_build(monkeypatch, *, hip):
+    """Run _build_zimage with the 15GB of loading stubbed out.
+
+    The pipe is specced against the real ZImagePipeline, so calling a method that
+    class doesn't have raises AttributeError instead of silently passing - which is
+    how `pipe.enable_vae_tiling()` shipped broken.
+    """
+    import transformers
+    from unittest.mock import MagicMock
+
+    spec = [m for m in dir(diffusers.ZImagePipeline) if not m.startswith("__")] + ["vae"]
+    pipe = MagicMock(spec=spec)
+    pipe.vae = MagicMock(spec=[m for m in dir(diffusers.AutoencoderKL) if not m.startswith("__")])
+
+    monkeypatch.setattr(diffusers.ZImageTransformer2DModel, "from_single_file",
+                        classmethod(lambda cls, *a, **k: MagicMock()))
+    monkeypatch.setattr(transformers.Qwen3Model, "from_pretrained",
+                        classmethod(lambda cls, *a, **k: MagicMock()))
+    monkeypatch.setattr(diffusers.ZImagePipeline, "from_pretrained",
+                        classmethod(lambda cls, *a, **k: pipe))
+    monkeypatch.setattr(torch.version, "hip", "7.13" if hip else None)
+    return pipeline._build_zimage(), pipe
+
+
+def test_build_zimage_only_calls_methods_the_pipeline_really_has(monkeypatch):
+    returned, pipe = _mock_zimage_build(monkeypatch, hip=True)
+    assert returned is pipe
+    pipe.enable_model_cpu_offload.assert_called_once()
+
+
+def test_build_zimage_tiles_the_vae_on_rocm(monkeypatch):
+    # gfx103x has no MIOpen kernel for a full 1024 decode; untiled it faults the GPU
+    _, pipe = _mock_zimage_build(monkeypatch, hip=True)
+    pipe.vae.enable_tiling.assert_called_once()
+
+
+def test_build_zimage_skips_vae_tiling_off_rocm(monkeypatch):
+    _, pipe = _mock_zimage_build(monkeypatch, hip=False)
+    pipe.vae.enable_tiling.assert_not_called()

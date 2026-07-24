@@ -83,18 +83,21 @@ def build_prompt(phrase: str, filters: str) -> str:
     return PROMPT_TEMPLATE.format(phrase=phrase, style=style)
 
 
-FLUX_MODEL = "black-forest-labs/FLUX.1-schnell"
-# 4-bit transformer: 6.9GB instead of the 24GB bf16 one, so it fits in a 10GB card.
-FLUX_GGUF = (
-    "https://huggingface.co/unsloth/FLUX.1-schnell-GGUF/blob/main/flux1-schnell-Q4_K_M.gguf"
+ZIMAGE_MODEL = "Tongyi-MAI/Z-Image-Turbo"
+# Z-Image is 6B where FLUX was 12B, so 8-bit fits the card that forced FLUX to 4-bit:
+# 7.2GB vs 6.9GB, for near-lossless weights instead of heavily compressed ones.
+ZIMAGE_GGUF = (
+    "https://huggingface.co/unsloth/Z-Image-Turbo-GGUF/blob/main/z-image-turbo-Q8_0.gguf"
 )
+# Abliterated Qwen3-4B text encoder: same architecture as the stock one, retrained to
+# drop refusals so benign-but-edgy shirt concepts don't get rejected at the prompt stage.
+ZIMAGE_ENCODER = "BennyDaBall/Qwen3-4b-Z-Image-Turbo-AbliteratedV1"
 
 _has_local = None
-_flux = None
 
 
 def has_local() -> bool:
-    """True when a CUDA/ROCm GPU is available to run FLUX locally."""
+    """True when a CUDA/ROCm GPU is available to generate images locally."""
     global _has_local
     if _has_local is None:
         import sys
@@ -111,40 +114,53 @@ def has_local() -> bool:
     return _has_local
 
 
-def _build_flux():
+def _build_zimage():
+    """Z-Image-Turbo with an 8-bit transformer and the abliterated text encoder."""
     import torch
-    from diffusers import FluxPipeline
+    from diffusers import GGUFQuantizationConfig, ZImagePipeline, ZImageTransformer2DModel
+    from transformers import Qwen3Model
 
+    transformer = ZImageTransformer2DModel.from_single_file(
+        ZIMAGE_GGUF,
+        quantization_config=GGUFQuantizationConfig(compute_dtype=torch.bfloat16),
+        torch_dtype=torch.bfloat16,
+    )
+    # the checkpoint is a ForCausalLM; loading it as the base model drops the unused
+    # LM head (~0.8GB) since the pipeline only reads hidden_states[-2]
+    text_encoder = Qwen3Model.from_pretrained(ZIMAGE_ENCODER, torch_dtype=torch.bfloat16)
+    pipe = ZImagePipeline.from_pretrained(
+        ZIMAGE_MODEL,
+        transformer=transformer,
+        text_encoder=text_encoder,
+        torch_dtype=torch.bfloat16,
+    )
+    pipe.enable_model_cpu_offload()
     if torch.version.hip:
-        # AMD: bf16 weights would have to stream layer-by-layer through system RAM,
-        # so load a 4-bit transformer that fits in VRAM whole instead.
-        from diffusers import FluxTransformer2DModel, GGUFQuantizationConfig
-
-        transformer = FluxTransformer2DModel.from_single_file(
-            FLUX_GGUF,
-            quantization_config=GGUFQuantizationConfig(compute_dtype=torch.bfloat16),
-            torch_dtype=torch.bfloat16,
-        )
-        pipe = FluxPipeline.from_pretrained(
-            FLUX_MODEL, transformer=transformer, torch_dtype=torch.bfloat16
-        )
-        pipe.enable_model_cpu_offload()
-        # MIOpen has no gfx103x kernels for a full-size 1024 decode and faults the GPU
-        # context outright; tiling keeps each conv small enough to dodge that path.
-        pipe.enable_vae_tiling()
-        return pipe
-
-    pipe = FluxPipeline.from_pretrained(FLUX_MODEL, torch_dtype=torch.bfloat16)
-    vram_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
-    if vram_gb >= 20:
-        pipe.enable_model_cpu_offload()  # whole components in VRAM at once: fast
-    else:
-        # streams layer-by-layer: fits ~8GB+ cards, slower per image
-        pipe.enable_sequential_cpu_offload()
+        # Insurance for sizes above 1024, where gfx103x MIOpen has no conv kernel and
+        # faults the GPU context outright (FLUX hit this). At 1024 it is a no-op: the
+        # latent is 128x128 and tile_latent_min_size is also 128, so it makes one tile.
+        # ZImagePipeline has no enable_vae_tiling() wrapper, so drive the VAE directly.
+        pipe.vae.enable_tiling()
     return pipe
 
 
-FLUX_STEPS = 4
+ZIMAGE_STEPS = 9  # Turbo is distilled for 9 (8 DiT forwards); guidance must stay 0
+
+# name -> (builder, steps). Z-Image replaced FLUX, but the registry stays so the
+# stored `image_model` setting keeps meaning something and the next model is a
+# one-line addition rather than a rewrite of generate_image_local.
+MODELS = {
+    "zimage": (_build_zimage, ZIMAGE_STEPS),
+}
+DEFAULT_MODEL = "zimage"
+
+
+def current_model() -> str:
+    """Which image model the dashboard is set to use."""
+    import db
+
+    name = db.get_setting("image_model") or DEFAULT_MODEL
+    return name if name in MODELS else DEFAULT_MODEL
 
 
 def step_progress(step_index: int, steps: int) -> int:
@@ -153,22 +169,38 @@ def step_progress(step_index: int, steps: int) -> int:
     return round((step_index + 1) / (steps + 1) * 100)
 
 
+_pipe = None
+_pipe_name = None
+
+
 def generate_image_local(prompt: str, on_step=None) -> bytes:
-    """Generate one PNG with FLUX.1-schnell on the local GPU (needs requirements-local.txt).
-    on_step(pct) is called after each denoising step with an int 0-100."""
-    global _flux
+    """Generate one PNG on the local GPU (needs requirements-local.txt).
+    Uses whichever model `image_model` names; on_step(pct) gets an int 0-100."""
+    global _pipe, _pipe_name
     import io
 
-    if _flux is None:
-        _flux = _build_flux()
+    name = current_model()
+    build, steps = MODELS[name]
+    if _pipe_name != name:
+        if _pipe is not None:
+            # free the outgoing model first - two of these do not fit in 10GB together
+            import gc
+
+            import torch
+
+            _pipe, _pipe_name = None, None
+            gc.collect()
+            torch.cuda.empty_cache()
+        _pipe = build()
+        _pipe_name = name
 
     def _cb(pipe, step_index, timestep, kwargs):
         if on_step:
-            on_step(step_progress(step_index, FLUX_STEPS))
+            on_step(step_progress(step_index, steps))
         return kwargs
 
-    img = _flux(
-        prompt, num_inference_steps=FLUX_STEPS, guidance_scale=0.0,
+    img = _pipe(
+        prompt, num_inference_steps=steps, guidance_scale=0.0,
         width=1024, height=1024, callback_on_step_end=_cb,
     ).images[0]
     buf = io.BytesIO()

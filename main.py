@@ -83,6 +83,7 @@ class SettingsBody(BaseModel):
     access_code: str = ""
     prompt_template: str = ""
     refine_prompt: str = ""
+    image_model: str = ""
 
 
 @app.post("/api/generate")
@@ -286,6 +287,8 @@ def get_settings():
     out = {k: bool(db.get_setting(k)) for k in keys}
     out["prompt_template"] = db.get_setting("prompt_template") or DEFAULT_PROMPT
     out["refine_prompt"] = db.get_setting("refine_prompt") or refine.DEFAULT_REFINE_PROMPT
+    out["image_model"] = pipeline.current_model()
+    out["image_models"] = list(pipeline.MODELS)
     return out
 
 

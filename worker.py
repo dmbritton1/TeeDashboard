@@ -1,4 +1,4 @@
-"""Background queue worker: generates queued designs on the local GPU with FLUX."""
+"""Background queue worker: generates queued designs on the local GPU."""
 import os
 import threading
 import time
