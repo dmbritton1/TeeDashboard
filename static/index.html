@@ -95,6 +95,10 @@
           <label style="min-width:0"><input type="checkbox" id="refine_toggle" checked> Refine with Gemma</label>
           <span class="hint">2 variations per filter term (per line if no filters) · paced ~2/min to stay inside the free tier</span>
         </div>
+        <div class="row">
+          <label style="min-width:0"><input type="checkbox" id="speed_toggle" onchange="saveSpeed()"> Speed Production</label>
+          <span class="hint" id="speed_state">loading…</span>
+        </div>
         <details class="panel" style="margin-top:12px">
           <summary>Creative refinement (advanced)</summary>
           <div class="panel-label" style="margin-top:8px">System prompt — how Gemma rewrites your lines into creative prompts</div>

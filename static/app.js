@@ -275,6 +275,25 @@ function forgetCode() {
   localStorage.removeItem("accessCode");
   flash("Access code cleared on this device");
 }
+function showSpeedState(size) {
+  document.getElementById("speed_state").textContent = size === 512
+    ? "512px · about 2x faster (~2.7 min vs ~5.7 min here) — good for sifting ideas"
+    : "1024px full size · ~5.7 min per image on this GPU";
+}
+async function saveSpeed() {
+  const on = document.getElementById("speed_toggle").checked;
+  const state = document.getElementById("speed_state");
+  try {
+    // "on"/"off", never "": save_settings drops empty values, so a blank would
+    // silently leave the previous setting in place
+    const s = await api("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({speed_production: on ? "on" : "off"})});
+    showSpeedState(on ? 512 : 1024);
+    // the worker reads the size per image, so it lands on the next one
+    flash(on ? "Speed Production on — next images generate at 512px"
+             : "Speed Production off — next images generate at 1024px");
+  } catch (e) { state.textContent = "✗ " + e.message; }
+}
 async function saveModel() {
   const el = document.getElementById("model_select");
   const state = document.getElementById("model_state");
@@ -792,6 +811,8 @@ async function loadPrompt() {
     const LABELS = {zimage: "Z-Image-Turbo (8-bit)"};
     sel.innerHTML = (s.image_models || []).map(m =>
       `<option value="${m}" ${m === s.image_model ? "selected" : ""}>${LABELS[m] || m}</option>`).join("");
+    document.getElementById("speed_toggle").checked = !!s.speed_production;
+    showSpeedState(s.image_size);
     promptLoaded = true;
   } catch (e) {}
 }

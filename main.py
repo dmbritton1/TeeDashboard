@@ -84,6 +84,9 @@ class SettingsBody(BaseModel):
     prompt_template: str = ""
     refine_prompt: str = ""
     image_model: str = ""
+    # "on"/"off" rather than a bool: save_settings skips empty values, so a plain
+    # false would be indistinguishable from "not sent" and could never be turned off
+    speed_production: str = ""
 
 
 @app.post("/api/generate")
@@ -289,6 +292,8 @@ def get_settings():
     out["refine_prompt"] = db.get_setting("refine_prompt") or refine.DEFAULT_REFINE_PROMPT
     out["image_model"] = pipeline.current_model()
     out["image_models"] = list(pipeline.MODELS)
+    out["speed_production"] = pipeline.current_size() == pipeline.FAST_SIZE
+    out["image_size"] = pipeline.current_size()
     return out
 
 

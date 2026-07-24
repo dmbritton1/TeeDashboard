@@ -64,6 +64,40 @@ def test_zimage_pipeline_exposes_model_cpu_offload():
     assert hasattr(diffusers.ZImagePipeline, "enable_model_cpu_offload")
 
 
+# Speed Production: generate at 512 instead of 1024. The VAE decode is ~94% of
+# wall-clock on a card with no optimised conv kernel, and it scales with pixels,
+# so halving each side is the one lever that actually moves the number.
+def test_size_defaults_to_full_when_unset(tmp_path, monkeypatch):
+    import db
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "s.db"))
+    db.init()
+    assert pipeline.current_size() == pipeline.FULL_SIZE == 1024
+
+
+def test_speed_production_on_gives_512(tmp_path, monkeypatch):
+    import db
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "s.db"))
+    db.init()
+    db.set_setting("speed_production", "on")
+    assert pipeline.current_size() == pipeline.FAST_SIZE == 512
+
+
+def test_speed_production_off_gives_1024(tmp_path, monkeypatch):
+    import db
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "s.db"))
+    db.init()
+    db.set_setting("speed_production", "off")   # explicit off must round-trip, not just unset
+    assert pipeline.current_size() == 1024
+
+
+def test_unrecognised_speed_value_falls_back_to_full(tmp_path, monkeypatch):
+    import db
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "s.db"))
+    db.init()
+    db.set_setting("speed_production", "yes-please")
+    assert pipeline.current_size() == 1024      # never hand the pipeline a junk size
+
+
 def _mock_zimage_build(monkeypatch, *, hip):
     """Run _build_zimage with the 15GB of loading stubbed out.
 

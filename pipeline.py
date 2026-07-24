@@ -163,6 +163,23 @@ def current_model() -> str:
     return name if name in MODELS else DEFAULT_MODEL
 
 
+FULL_SIZE = 1024
+FAST_SIZE = 512  # "Speed Production": a quarter of the pixels to decode
+
+
+def current_size() -> int:
+    """Edge length to generate at. Speed Production trades detail for throughput.
+
+    512 is a quarter of the pixels but only ~2x the speed in practice - measured
+    2.7 min vs 5.7 min on an RX 6700 - because model load and text encoding are
+    fixed costs that don't shrink with resolution. Anything but an explicit "on"
+    means full size.
+    """
+    import db
+
+    return FAST_SIZE if db.get_setting("speed_production") == "on" else FULL_SIZE
+
+
 def step_progress(step_index: int, steps: int) -> int:
     """Percent to show after finishing step `step_index` (0-based) of `steps`.
     Reserves the top of the bar for the VAE decode that follows the loop."""
@@ -175,7 +192,8 @@ _pipe_name = None
 
 def generate_image_local(prompt: str, on_step=None) -> bytes:
     """Generate one PNG on the local GPU (needs requirements-local.txt).
-    Uses whichever model `image_model` names; on_step(pct) gets an int 0-100."""
+    Uses whichever model `image_model` names, at whichever size Speed Production
+    implies; on_step(pct) gets an int 0-100."""
     global _pipe, _pipe_name
     import io
 
@@ -199,9 +217,10 @@ def generate_image_local(prompt: str, on_step=None) -> bytes:
             on_step(step_progress(step_index, steps))
         return kwargs
 
+    size = current_size()  # read per image, so the toggle lands on the next one
     img = _pipe(
         prompt, num_inference_steps=steps, guidance_scale=0.0,
-        width=1024, height=1024, callback_on_step_end=_cb,
+        width=size, height=size, callback_on_step_end=_cb,
     ).images[0]
     buf = io.BytesIO()
     img.save(buf, "PNG")

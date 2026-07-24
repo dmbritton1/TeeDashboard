@@ -146,6 +146,22 @@ def test_unknown_image_model_falls_back_to_default(tmp_path, monkeypatch):
     assert pipeline.current_model() == "zimage"  # never hand the worker a bad name
 
 
+def test_speed_production_roundtrips_both_ways(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    assert main.get_settings()["speed_production"] is False   # default: full size
+    assert main.get_settings()["image_size"] == 1024
+
+    main.save_settings(main.SettingsBody(speed_production="on"))
+    assert main.get_settings()["speed_production"] is True
+    assert main.get_settings()["image_size"] == 512
+
+    # the one that bites: save_settings ignores empty strings, so turning it back
+    # off has to send a non-empty "off" or the toggle would be one-way
+    main.save_settings(main.SettingsBody(speed_production="off"))
+    assert main.get_settings()["speed_production"] is False
+    assert main.get_settings()["image_size"] == 1024
+
+
 def test_flux_is_gone(tmp_path, monkeypatch):
     """FLUX was removed; a stored 'flux' setting must not resurrect it."""
     load_main(tmp_path, monkeypatch)
