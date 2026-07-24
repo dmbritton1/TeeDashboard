@@ -404,8 +404,16 @@ function card(d) {
   }[d.status] || "";
   return `<div class="card${selected.has(d.id) ? " selected" : ""}" data-id="${d.id}"><div class="frame">${pick}${img}</div><div class="body"><div class="phrase">${esc(d.phrase)}</div>` +
     `<div class="filters">${esc(d.filters)}</div>` +
+    promptLine(d) +
     (d.error ? `<div class="error">${esc(d.error)}</div>` : "") +
     `</div><div class="actions">${buttons}</div></div>`;
+}
+// The exact text sent to FLUX. A rich sentence means Gemma refined it; no stored
+// prompt means the plain t-shirt template was used (the worker doesn't save that).
+function promptLine(d) {
+  if (d.prompt) return `<details class="prompt"><summary>prompt</summary>${esc(d.prompt)}</details>`;
+  if (d.test) return "";
+  return `<div class="prompt none">template · no Gemma refinement</div>`;
 }
 function render() {
   renderDashboard();
@@ -692,6 +700,7 @@ function renderLightbox() {
     `<div class="lb-row"><span class="status-chip">${st}</span> · ${(d.created_at || "").slice(0, 10)}</div>` +
     `<div class="lb-row">${stars(d)}</div>` +
     `<div class="lb-row">Style: ${esc(d.filters) || "—"}</div>` +
+    `<div class="lb-row">Prompt: ${d.prompt ? esc(d.prompt) : "<em>template · no Gemma refinement</em>"}</div>` +
     `<div class="lb-row">Your tags<br><input type="text" id="lb_tags" value="${esc(d.tags || "")}" placeholder="comma, separated"> ` +
     `<button style="margin-top:6px" onclick="saveTags(${d.id})">Save tags</button></div>` +
     (d.error ? `<div class="lb-row" style="color:var(--clay)">${esc(d.error)}</div>` : "") +

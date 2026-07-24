@@ -207,6 +207,9 @@ label { font-size: 13px; color: var(--stone); min-width: 108px; }
 .card .body { padding: 14px 16px 4px; }
 .card .phrase { font-family: "Italiana", serif; font-size: 19px; line-height: 1.25; letter-spacing: 0.03em; }
 .card .filters { font-family: var(--mono); font-size: 11px; color: var(--stone); margin-top: 6px; }
+.card .prompt { font-family: var(--mono); font-size: 10.5px; color: var(--vein-grey); margin-top: 6px; line-height: 1.5; }
+.card .prompt summary { cursor: pointer; color: var(--stone); }
+.card .prompt.none { font-style: italic; }
 .card .error { font-size: 12px; color: var(--clay); margin-top: 6px; }
 .card .actions { display: flex; gap: 6px; padding: 13px 16px 16px; flex-wrap: wrap; align-items: center; }
 .card .actions button { padding: 7px 13px; font-size: 10.5px; }
