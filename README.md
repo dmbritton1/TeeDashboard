@@ -81,8 +81,11 @@ walk away, come back to review. The status bar shows today's usage.
 The dashboard runs on this machine; a tunnel gives it a public link so others
 can open it in a browser and queue images. Generation still happens locally.
 
-1. Set an **Access code** in the dashboard settings (gates image generation; a
-   leaked link alone can't queue work). Without a code the link is open.
+1. Set an **Access code** in the dashboard settings (gates image generation).
+   **Treat the tunnel link like a password.** Anyone who has it can download a
+   full backup of the dashboard - including the access code and your Printify
+   token - without even entering the code. Only share the link with people
+   you trust. Without a code set, the link is open to everyone.
 2. Install `cloudflared` from Cloudflare's site.
 3. Run:
 
