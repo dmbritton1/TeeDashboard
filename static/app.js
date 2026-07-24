@@ -119,7 +119,7 @@ function askForCode() {
 
 // Reads are never gated; only mutating calls can come back 401, so the prompt
 // can't fire from the 3s refresh loop.
-async function api(path, opts) {
+async function apiFetch(path, opts) {
   opts = Object.assign({}, opts);
   const withCode = code => Object.assign({}, opts.headers, {"X-Access-Code": code});
   const sent = localStorage.getItem("accessCode");
@@ -140,7 +140,29 @@ async function api(path, opts) {
     try { detail = (await r.json()).detail || detail; } catch (e) {}
     throw new Error(detail);
   }
-  return r.json();
+  return r;
+}
+
+async function api(path, opts) {
+  return (await apiFetch(path, opts)).json();
+}
+
+// Export and backup are gated too, so they can't be plain <a href> links — those
+// can't send X-Access-Code. Fetch with the header, then save the blob.
+async function downloadFile(path, fallbackName) {
+  try {
+    const r = await apiFetch(path);
+    const cd = r.headers.get("content-disposition") || "";
+    const m = cd.match(/filename="?([^"]+)"?/);
+    const url = URL.createObjectURL(await r.blob());
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = m ? m[1] : fallbackName;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    alert("Download failed: " + e.message);
+  }
 }
 // minimal CSV: two columns, handles quoted cells with commas/newlines
 function parseCSV(text) {

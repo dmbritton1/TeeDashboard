@@ -73,6 +73,25 @@ def test_settings_gated_once_code_set():
     assert r.status_code == 200, r.text
 
 
+DATA_EXPORTS = ["/api/export.csv", "/api/backup"]
+
+
+def test_data_exports_open_when_no_code_set():
+    _reset()
+    for path in DATA_EXPORTS:
+        assert client.get(path).status_code == 200, path
+
+
+def test_data_exports_gated_once_code_set():
+    _reset()
+    db.set_setting("access_code", "hunter2")
+    # the backup zip contains designs.db, which holds the code and Printify token
+    for path in DATA_EXPORTS:
+        assert client.get(path).status_code == 401, f"{path} not gated"
+        r = client.get(path, headers={"X-Access-Code": "hunter2"})
+        assert r.status_code == 200, f"{path}: {r.text}"
+
+
 import worker  # noqa: E402
 
 

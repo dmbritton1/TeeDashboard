@@ -337,7 +337,7 @@ def test_printify():
 
 
 @app.get("/api/export.csv")
-def export_csv():
+def export_csv(_gate: None = Depends(require_access_code)):
     with db.connect() as con:
         rows = con.execute(
             "SELECT id, phrase, filters, status, tags, rating, product_id, created_at "
@@ -355,7 +355,7 @@ def export_csv():
 
 
 @app.get("/api/backup")
-def backup():
+def backup(_gate: None = Depends(require_access_code)):
     fd, path = tempfile.mkstemp(suffix=".zip")
     os.close(fd)
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
