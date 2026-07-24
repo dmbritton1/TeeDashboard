@@ -1,11 +1,14 @@
 from pipeline import parse_input, build_prompt, step_progress
 
 
-def test_parse_basic():
+def test_parse_explodes_one_row_per_filter_term():
     text = "funny fishing shirt | vintage, distressed, black shirt\nplant mom | retro 70s, floral\n"
     assert parse_input(text) == [
-        ("funny fishing shirt", "vintage, distressed, black shirt"),
-        ("plant mom", "retro 70s, floral"),
+        ("funny fishing shirt", "vintage"),
+        ("funny fishing shirt", "distressed"),
+        ("funny fishing shirt", "black shirt"),
+        ("plant mom", "retro 70s"),
+        ("plant mom", "floral"),
     ]
 
 
@@ -14,7 +17,7 @@ def test_parse_bare_phrase_and_blank_lines():
 
 
 def test_parse_strips_messy_whitespace():
-    assert parse_input("  cat mom  |  cute ,  pastel  ") == [("cat mom", "cute, pastel")]
+    assert parse_input("  cat mom  |  cute ,  pastel  ") == [("cat mom", "cute"), ("cat mom", "pastel")]
 
 
 def test_parse_skips_empty_phrase():

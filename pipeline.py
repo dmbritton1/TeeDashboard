@@ -8,7 +8,9 @@ PROMPT_TEMPLATE = (
 
 
 def parse_input(text: str) -> list[tuple[str, str]]:
-    """Parse pasted 'phrase | filter1, filter2' lines into (phrase, filters) tuples."""
+    """Parse pasted 'phrase | filter1, filter2' lines into (phrase, filter) tuples,
+    one row per filter term so each term gets its own batch of variations.
+    A line with no filters yields a single (phrase, "") row."""
     items = []
     for line in text.splitlines():
         line = line.strip()
@@ -18,8 +20,9 @@ def parse_input(text: str) -> list[tuple[str, str]]:
         phrase = phrase.strip()
         if not phrase:
             continue
-        filters = ", ".join(f.strip() for f in filters.split(",") if f.strip())
-        items.append((phrase, filters))
+        terms = [f.strip() for f in filters.split(",") if f.strip()]
+        for term in terms or [""]:
+            items.append((phrase, term))
     return items
 
 

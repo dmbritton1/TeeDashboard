@@ -224,7 +224,7 @@ async function queueItems(items) {
   if (refine && res.refined === false)
     flash("Gemma refinement was skipped — generated from the basic template instead.");
   else
-    flash(`Queued ${items.length} idea${items.length === 1 ? "" : "s"} (2 variations each)`);
+    flash(`Queued ${res.queued} image${res.queued === 1 ? "" : "s"} (2 variations per filter term)`);
   refresh();
 }
 
