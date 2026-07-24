@@ -97,6 +97,8 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        # ponytail: terminate() only, no wait/kill fallback - verified both
+        # children exit on SIGINT; add one if orphans are ever observed
         for process in (tunnel, server):
             if process:
                 process.terminate()
