@@ -5,3 +5,5 @@ designs.db
 designs/
 weights/
 .pytest_cache/
+probe/*.png
+
