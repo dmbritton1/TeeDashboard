@@ -48,6 +48,42 @@ def test_step_progress_monotonic_and_below_100():
     assert max(pct) < 100
 
 
+# 50x70cm poster ladder. dpi is what decides whether a size is sellable, so the
+# ladder is ordered by it and the probe walks it top-down.
+def test_poster_dpi_top_rung_is_effectively_300():
+    assert pipeline.poster_dpi(1440, 2016) == 292
+
+
+def test_poster_dpi_uses_the_worse_axis():
+    # a wide-but-short image must not get to claim the width's dpi
+    assert pipeline.poster_dpi(1440, 1008) == 146
+
+
+def test_poster_dpi_scales_with_the_upscale_factor():
+    assert pipeline.poster_dpi(1440, 2016, upscale=1) == 73
+
+
+def test_poster_ladder_descends_in_quality():
+    dpis = [pipeline.poster_dpi(w, h) for w, h in pipeline.POSTER_LADDER]
+    assert dpis == sorted(dpis, reverse=True)
+    assert len(set(dpis)) == len(dpis)      # no rung is a pointless repeat of another
+
+
+def test_poster_ladder_holds_an_exact_5_7_aspect():
+    assert all(w * 7 == h * 5 for w, h in pipeline.POSTER_LADDER)
+
+
+def test_poster_ladder_sides_are_16_aligned():
+    # latent is /8 with a /2 patch step; 16 is the alignment that never needs padding
+    assert all(w % 16 == 0 and h % 16 == 0 for w, h in pipeline.POSTER_LADDER)
+
+
+def test_poster_ladder_spans_print_quality_down_to_the_large_format_floor():
+    dpis = [pipeline.poster_dpi(w, h) for w, h in pipeline.POSTER_LADDER]
+    assert dpis[0] >= 290       # top rung is worth attempting
+    assert dpis[-1] <= 150      # bottom rung proves non-square works even if unsellable
+
+
 # _build_zimage can't run without a GPU and 15GB of weights, but the offload/tiling
 # calls it makes are pure API surface — and getting one wrong is silent until an
 # image is actually generated. It shipped calling pipe.enable_vae_tiling(), which

@@ -180,6 +180,30 @@ def current_size() -> int:
     return FAST_SIZE if db.get_setting("speed_production") == "on" else FULL_SIZE
 
 
+# 50 x 70 cm poster ladder, best quality first. Exact 5:7 (50:70), every side
+# divisible by 16 - the latent is /8 with a /2 patch step, so 16 never needs padding.
+# probe_poster.py walks this top-down and stops at the first size the GPU survives:
+# every rung is taller than 1024, which is where gfx103x MIOpen has no conv kernel.
+POSTER_LADDER = (
+    (1440, 2016),   # 292 dpi - effectively print standard
+    (1280, 1792),   # 260 dpi
+    (1120, 1568),   # 227 dpi
+    (1040, 1456),   # 211 dpi
+    (960, 1344),    # 195 dpi
+    (800, 1120),    # 162 dpi - still above the large-format floor
+    (720, 1008),    # 146 dpi - below the floor; a diagnostic rung, not a sellable one
+)
+POSTER_INCHES = (19.685, 27.559)  # 50 x 70 cm
+
+
+def poster_dpi(width: int, height: int, upscale: int = 4) -> int:
+    """Print resolution a generated image gives on a 50x70cm poster, after the 4x
+    upscale. Takes the worse of the two axes so an off-ratio image can't flatter
+    itself with its long side."""
+    w_in, h_in = POSTER_INCHES
+    return int(min(width * upscale / w_in, height * upscale / h_in))
+
+
 def step_progress(step_index: int, steps: int) -> int:
     """Percent to show after finishing step `step_index` (0-based) of `steps`.
     Reserves the top of the bar for the VAE decode that follows the loop."""
