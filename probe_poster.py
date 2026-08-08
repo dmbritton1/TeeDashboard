@@ -1,10 +1,16 @@
 """Find the largest 50x70cm poster this GPU can actually generate.
 
-Walks pipeline.POSTER_LADDER from best quality downward and stops at the first
-size that works. Each rung runs in a FRESH SUBPROCESS, and that isolation is the
-whole point: on gfx103x (RX 6700) a MIOpen kernel fault kills the GPU context, so
-a ladder walked inside one process would fail every rung after the first fault and
-report a floor that isn't real.
+Proves the square size still works, then proves the cheapest 5:7 size works, then
+walks pipeline.POSTER_LADDER from best quality downward and stops at the first size
+that works. The two controls come first because they fail differently: a broken
+square is a setup problem, and a broken floor rung means non-square generation
+itself is broken - in which case searching for a ceiling is hours wasted on an
+answer that doesn't exist.
+
+Each rung runs in a FRESH SUBPROCESS, and that isolation is the whole point: on
+gfx103x (RX 6700) a MIOpen kernel fault kills the GPU context, so a ladder walked
+inside one process would fail every rung after the first fault and report a floor
+that isn't real.
 
     .venv\\Scripts\\python probe_poster.py             walk the ladder (Windows)
     .venv/bin/python probe_poster.py                  walk the ladder (Linux/macOS)
@@ -19,6 +25,7 @@ import pipeline
 
 LADDER_TIMEOUT = 1800   # 30 min/rung - ~5x the measured 1024 time, so slow != hung
 WARMUP_TIMEOUT = 7200   # 2h - the very first run may download ~15GB of weights
+SELLABLE_DPI = 150      # normal floor for large wall art; under this is diagnostic only
 OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "probe")
 PROMPT = (
     "Art deco travel poster, geometric symmetrical ornamental structure, bold "
@@ -85,9 +92,28 @@ def main() -> None:
         _write_report(report)
         return
 
+    # Second control, and the cheapest run on the ladder: the floor rung has fewer
+    # pixels than the square above it and a latent under tile_latent_min_size, so its
+    # VAE decode is a smaller conv than the one that already works today. It separates
+    # "non-square is broken" from "big is broken" for the price of a single rung -
+    # and only the second of those has a ceiling worth searching for.
     say()
-    best = None
-    for width, height in pipeline.POSTER_LADDER:
+    floor = pipeline.POSTER_LADDER[-1]
+    say("Non-square control: %dx%d - the cheapest 5:7 size on the ladder." % floor)
+    ok, detail = try_size(*floor)
+    say("  %dx%d  %s  %s" % (floor[0], floor[1], "PASS" if ok else "FAIL", detail))
+    if not ok:
+        say()
+        say("The smallest 5:7 size failed while the square control passed, so the")
+        say("problem is non-square generation itself, not how big it is. Every rung")
+        say("above this one is larger and would fail the same way - walking them")
+        say("would cost hours and prove nothing.")
+        _write_report(report)
+        return
+
+    say()
+    best = floor + (pipeline.poster_dpi(*floor),)   # the floor is proven, so it's the fallback
+    for width, height in pipeline.POSTER_LADDER[:-1]:
         say("Trying %dx%d - %d dpi on a 50x70cm print" % (width, height, pipeline.poster_dpi(width, height)))
         ok, detail = try_size(width, height)
         say("  %s  %s" % ("PASS" if ok else "FAIL", detail))
@@ -96,13 +122,15 @@ def main() -> None:
             break
 
     say()
-    if best:
-        say("BEST: generate at %dx%d for %d dpi on a 50x70cm print." % best)
-        say("Now open probe/%dx%d.png and look at it. A size can finish without" % best[:2])
-        say("crashing and still come out smeared, banded, or seamed by VAE tiling.")
+    if best[2] < SELLABLE_DPI:
+        say("BEST: only the floor rung works - %dx%d at %d dpi, under the %d dpi"
+            % (best + (SELLABLE_DPI,)))
+        say("large-format floor. Non-square generation works, just not at a size")
+        say("worth selling. The ceiling is lower than the cheapest sellable poster.")
     else:
-        say("BEST: none. Every poster size failed while the square control passed,")
-        say("so the problem is non-square generation itself, not how big it is.")
+        say("BEST: generate at %dx%d for %d dpi on a 50x70cm print." % best)
+    say("Now open probe/%dx%d.png and look at it. A size can finish without" % best[:2])
+    say("crashing and still come out smeared, banded, or seamed by VAE tiling.")
     _write_report(report)
 
 
