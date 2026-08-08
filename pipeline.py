@@ -214,10 +214,11 @@ _pipe = None
 _pipe_name = None
 
 
-def generate_image_local(prompt: str, on_step=None) -> bytes:
+def generate_image_local(prompt: str, on_step=None, size: tuple[int, int] | None = None) -> bytes:
     """Generate one PNG on the local GPU (needs requirements-local.txt).
-    Uses whichever model `image_model` names, at whichever size Speed Production
-    implies; on_step(pct) gets an int 0-100."""
+    Uses whichever model `image_model` names; on_step(pct) gets an int 0-100.
+    `size` is an explicit (width, height) - posters need a non-square one and must
+    not be shrunk by Speed Production. Omit it for the square t-shirt default."""
     global _pipe, _pipe_name
     import io
 
@@ -241,10 +242,11 @@ def generate_image_local(prompt: str, on_step=None) -> bytes:
             on_step(step_progress(step_index, steps))
         return kwargs
 
-    size = current_size()  # read per image, so the toggle lands on the next one
+    # current_size() is read per image, so the Speed toggle lands on the next one
+    width, height = size or (current_size(), current_size())
     img = _pipe(
         prompt, num_inference_steps=steps, guidance_scale=0.0,
-        width=size, height=size, callback_on_step_end=_cb,
+        width=width, height=height, callback_on_step_end=_cb,
     ).images[0]
     buf = io.BytesIO()
     img.save(buf, "PNG")

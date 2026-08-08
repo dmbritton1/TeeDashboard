@@ -84,6 +84,61 @@ def test_poster_ladder_spans_print_quality_down_to_the_large_format_floor():
     assert dpis[-1] <= 150      # bottom rung proves non-square works even if unsellable
 
 
+class _FakeImage:
+    def save(self, buf, fmt):
+        buf.write(b"not-really-a-png")
+
+
+class _FakePipe:
+    """Stands in for the loaded ZImagePipeline so the size logic is testable
+    without 15GB of weights or a GPU."""
+
+    def __init__(self):
+        self.kwargs = None
+
+    def __call__(self, prompt, **kwargs):
+        self.kwargs = kwargs
+        import types
+        return types.SimpleNamespace(images=[_FakeImage()])
+
+
+def _fake_loaded_pipe(monkeypatch):
+    """Pretend the model for the current name is already loaded, so
+    generate_image_local skips the builder entirely."""
+    fake = _FakePipe()
+    monkeypatch.setattr(pipeline, "current_model", lambda: pipeline.DEFAULT_MODEL)
+    monkeypatch.setattr(pipeline, "_pipe", fake)
+    monkeypatch.setattr(pipeline, "_pipe_name", pipeline.DEFAULT_MODEL)
+    return fake
+
+
+def test_generate_uses_an_explicit_size_verbatim(monkeypatch):
+    fake = _fake_loaded_pipe(monkeypatch)
+    pipeline.generate_image_local("a poster", size=(1040, 1456))
+    assert (fake.kwargs["width"], fake.kwargs["height"]) == (1040, 1456)
+
+
+def test_generate_without_a_size_stays_square_at_current_size(monkeypatch):
+    fake = _fake_loaded_pipe(monkeypatch)
+    monkeypatch.setattr(pipeline, "current_size", lambda: 512)
+    pipeline.generate_image_local("a t-shirt graphic")
+    assert (fake.kwargs["width"], fake.kwargs["height"]) == (512, 512)
+
+
+def test_generate_ignores_speed_production_when_a_size_is_given(monkeypatch):
+    # Speed Production halves the edge for throughput; a poster asked for at an
+    # exact size must not get silently shrunk to an unprintable one.
+    fake = _fake_loaded_pipe(monkeypatch)
+    monkeypatch.setattr(pipeline, "current_size", lambda: 512)
+    pipeline.generate_image_local("a poster", size=(1440, 2016))
+    assert (fake.kwargs["width"], fake.kwargs["height"]) == (1440, 2016)
+
+
+def test_generate_returns_the_saved_image_bytes(monkeypatch):
+    _fake_loaded_pipe(monkeypatch)
+    assert pipeline.generate_image_local("x", size=(720, 1008)) == b"not-really-a-png"
+
+
 # _build_zimage can't run without a GPU and 15GB of weights, but the offload/tiling
 # calls it makes are pure API surface — and getting one wrong is silent until an
 # image is actually generated. It shipped calling pipe.enable_vae_tiling(), which
