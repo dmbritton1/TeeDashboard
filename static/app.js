@@ -233,7 +233,7 @@ async function queueItems(items) {
   const text = items.map(([p, f]) => f ? `${p} | ${f}` : p).join("\n");
   const style = document.getElementById("style_select").value;
   const refine = document.getElementById("refine_toggle").checked;
-  const product = document.getElementById("product_select").value;
+  const product = document.getElementById("product_select").value || "tee";
   const res = await api("/api/generate", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text, style, refine, product})});
   if (refine && res.refined === false)
     flash("Gemma refinement was skipped — generated from the basic template instead.");
@@ -678,7 +678,7 @@ async function generateTest() {
   if (!text) return;
   const hint = document.getElementById("testHint");
   try {
-    const product = document.getElementById("test_product_select").value;
+    const product = document.getElementById("test_product_select").value || "tee";
     await api("/api/test", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text, product})});
     // the prompt stays put so you can tweak a word and fire again
     hint.textContent = "queued ✓ · a few minutes per image on this GPU";
@@ -886,13 +886,17 @@ document.getElementById("prompt_box").addEventListener("input", () => {
 let refineSaveTimer;
 document.getElementById("refine_box").addEventListener("input", () => {
   if (!promptLoaded) return;
+  // Snapshot at keystroke time: cache the edit under the product it was written
+  // for immediately, so a dropdown switch inside the debounce window can neither
+  // lose it nor save it onto the other product.
+  const forProduct = refineProduct;
+  refinePrompts[forProduct] = document.getElementById("refine_box").value;
   clearTimeout(refineSaveTimer);
   refineSaveTimer = setTimeout(async () => {
-    const key = refineProduct === "poster" ? "refine_prompt_poster" : "refine_prompt";
-    refinePrompts[refineProduct] = document.getElementById("refine_box").value;
+    const key = forProduct === "poster" ? "refine_prompt_poster" : "refine_prompt";
     try {
       await api("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({[key]: refinePrompts[refineProduct]})});
+        body: JSON.stringify({[key]: refinePrompts[forProduct]})});
     } catch (e) { flash("Couldn't save the system prompt — " + e.message); }
   }, 600);
 });
