@@ -174,9 +174,12 @@ def write(design_id: int) -> None:
             # generation (e.g. title only) must leave the others as they were,
             # not blank out a hand-edit or an earlier successful field. Also
             # never touch `error` here: that column doubles as upscale's
-            # completion signal (main.py's publish guard), and a copywriting
-            # success clearing a real upscale failure would silently release
-            # the publish gate while print_file is still NULL.
+            # completion signal (main.py's publish guard). Neither a
+            # copywriting success nor a copywriting failure may clear or
+            # overwrite an "upscale failed" marker - either one would
+            # silently release the publish gate while print_file is still
+            # NULL. The failure branch below enforces the "never overwrite"
+            # half with a WHERE clause.
             cols = {"title": "listing_title", "tags": "listing_tags", "hook": "listing_hook"}
             sets, vals = [], []
             for key, col in cols.items():
@@ -190,9 +193,15 @@ def write(design_id: int) -> None:
                         (*vals, design_id),
                     )
         except Exception as e:
+            # WHERE (not a read-then-write) so this can't race upscale's own
+            # thread writing "upscale failed: ..." to the same row: whichever
+            # thread's UPDATE lands second, an existing upscale-failure
+            # marker always wins and is never overwritten by a listing
+            # failure.
             with db.connect() as con:
                 con.execute(
-                    "UPDATE designs SET error = ? WHERE id = ?",
+                    "UPDATE designs SET error = ? WHERE id = ? "
+                    "AND COALESCE(error, '') NOT LIKE 'upscale failed%'",
                     (("listing copy failed: %s" % e)[:500], design_id),
                 )
 

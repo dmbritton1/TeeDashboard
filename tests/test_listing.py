@@ -200,6 +200,24 @@ def test_write_records_the_error_and_leaves_the_design_alone_on_failure(tmp_path
     assert row["listing_title"] is None
 
 
+def test_write_failure_does_not_overwrite_an_existing_upscale_failure(tmp_path, monkeypatch):
+    """Same signal, the other failure ordering: upscale fails first (writes
+    "upscale failed: ..."), then listing.write also fails (e.g. a Gemini
+    timeout landing after a fast local upscale failure). The listing
+    failure must not clobber the upscale marker - print_file will never be
+    set now, so losing "upscale failed" would 409 every publish forever
+    with no way to know why, short of manual SQL."""
+    _db(tmp_path, monkeypatch)
+    _seed()
+    with db.connect() as con:
+        con.execute("UPDATE designs SET error = ? WHERE id = 1", ("upscale failed: OOM",))
+    def boom(*a, **k): raise RuntimeError("gemini timeout")
+    monkeypatch.setattr(listing, "generate", boom)
+    _write_sync(monkeypatch, 1)
+    row = _row()
+    assert row["error"] == "upscale failed: OOM"
+
+
 def test_write_success_does_not_clear_an_existing_upscale_failure(tmp_path, monkeypatch):
     """`error` doubles as main.py's publish-gate signal for upscale
     ("upscale failed: ..." means stop waiting and publish the fallback art).
