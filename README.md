@@ -112,20 +112,24 @@ walk away, come back to review. The status bar shows today's usage.
 The dashboard runs on this machine; a tunnel gives it a public link so others
 can open it in a browser and queue images. Generation still happens locally.
 
-1. Set an **Access code** in the dashboard settings. It gates image generation,
-   review actions, settings, and the CSV export and backup download - so a
-   leaked link alone can't queue work or pull your Printify token out of the
-   backup zip. Anyone with the link can still *look* at designs. Without a code
-   set, the link is open to everyone.
+1. Add a password to `.env` on this machine:
+
+       DASHBOARD_PASSWORD=pick-something-only-you-two-know
+
+   The dashboard refuses to start without one. It is the only way in - the
+   designs, the images, and the settings are all behind it, not just the
+   buttons. Change it by editing this line and restarting; that also signs
+   out everyone who was already in.
 2. Install `cloudflared` from Cloudflare's site.
 3. Run:
 
        .venv\Scripts\python share.py
 
 That starts the server, opens the tunnel, and prints a
-`https://<random>.trycloudflare.com` URL. Share it. Anyone who opens it gets the
-dashboard and, on first generate, is asked for the access code. Ctrl-C stops
-both the server and the tunnel.
+`https://<random>.trycloudflare.com` URL. Share it, and share the password
+separately. Anyone who opens the link gets a login page; once past it they stay
+signed in on that browser for 30 days, or until you change the password. Ctrl-C
+stops both the server and the tunnel.
 
 ### Email the link automatically
 
