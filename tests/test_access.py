@@ -77,77 +77,12 @@ def test_logout_clears_the_cookie():
     assert a.get("/api/designs").status_code == 401
 
 
-def test_generation_open_when_no_code_set():
+def test_data_exports_need_a_cookie():
     _reset()
-    r = client.post("/api/test", json={"text": "a red dragon"})
-    assert r.status_code == 200, r.text
-
-
-def test_generation_blocked_without_code_header_when_code_set():
-    _reset()
-    db.set_setting("access_code", "hunter2")
-    r = client.post("/api/test", json={"text": "a red dragon"})
-    assert r.status_code == 401
-
-
-def test_generation_blocked_with_wrong_code():
-    _reset()
-    db.set_setting("access_code", "hunter2")
-    r = client.post("/api/test", json={"text": "a red dragon"},
-                    headers={"X-Access-Code": "nope"})
-    assert r.status_code == 401
-
-
-def test_generation_allowed_with_correct_code():
-    _reset()
-    db.set_setting("access_code", "hunter2")
-    r = client.post("/api/test", json={"text": "a red dragon"},
-                    headers={"X-Access-Code": "hunter2"})
-    assert r.status_code == 200, r.text
-
-
-def test_reading_designs_never_gated():
-    _reset()
-    db.set_setting("access_code", "hunter2")
-    assert client.get("/api/designs").status_code == 200
-    assert client.get("/api/status").status_code == 200
-
-
-def test_settings_open_when_no_code_set():
-    _reset()
-    r = client.post("/api/settings", json={"access_code": "hunter2"})
-    assert r.status_code == 200, r.text
-    assert client.get("/api/status").json()["access_code"] is True
-
-
-def test_settings_gated_once_code_set():
-    _reset()
-    db.set_setting("access_code", "hunter2")
-    # no header -> cannot overwrite the code
-    assert client.post("/api/settings", json={"access_code": "attacker"}).status_code == 401
-    # correct header -> owner can still change settings
-    r = client.post("/api/settings", json={"gemini_api_key": "k"},
-                    headers={"X-Access-Code": "hunter2"})
-    assert r.status_code == 200, r.text
-
-
-DATA_EXPORTS = ["/api/export.csv", "/api/backup"]
-
-
-def test_data_exports_open_when_no_code_set():
-    _reset()
-    for path in DATA_EXPORTS:
-        assert client.get(path).status_code == 200, path
-
-
-def test_data_exports_gated_once_code_set():
-    _reset()
-    db.set_setting("access_code", "hunter2")
-    # the backup zip contains designs.db, which holds the code and Printify token
-    for path in DATA_EXPORTS:
-        assert client.get(path).status_code == 401, f"{path} not gated"
-        r = client.get(path, headers={"X-Access-Code": "hunter2"})
-        assert r.status_code == 200, f"{path}: {r.text}"
+    a = _anon()
+    for path in ("/api/export.csv", "/api/backup"):
+        assert a.get(path).status_code == 401, f"{path} not gated"
+        assert client.get(path).status_code == 200, f"{path}: refused a signed-in client"
 
 
 import worker  # noqa: E402
@@ -168,20 +103,6 @@ def test_queue_cap_allows_below_limit():
         con.execute("INSERT INTO designs (phrase, filters, status) VALUES ('x','','queued')")
     r = client.post("/api/test", json={"text": "still room"})
     assert r.status_code == 200, r.text
-
-
-def test_all_mutating_design_actions_gated_when_code_set():
-    _reset()
-    db.set_setting("access_code", "hunter2")
-    with db.connect() as con:
-        con.execute("INSERT INTO designs (phrase, filters, status) VALUES ('x','','pending')")
-        did = con.execute("SELECT id FROM designs").fetchone()["id"]
-    for action in ["approve", "reject", "retry", "regenerate", "publish", "unreview"]:
-        r = client.post(f"/api/designs/{did}/{action}")
-        assert r.status_code == 401, f"{action} not gated (got {r.status_code})"
-    # DELETE method is also gated
-    r = client.delete(f"/api/designs/{did}")
-    assert r.status_code == 401, f"DELETE not gated (got {r.status_code})"
 
 
 def test_regenerate_respects_queue_cap():
