@@ -54,3 +54,15 @@ def test_prompt_column_exists(tmp_path, monkeypatch):
     with db.connect() as con:
         cols = {r["name"] for r in con.execute("PRAGMA table_info(designs)")}
     assert "prompt" in cols
+
+
+def test_product_column_defaults_to_tee(tmp_path, monkeypatch):
+    setup_tmp(tmp_path, monkeypatch)
+    db.init()  # run twice: must not raise
+    with db.connect() as con:
+        cols = {r["name"] for r in con.execute("PRAGMA table_info(designs)")}
+        assert "product" in cols
+        # a row inserted by code that predates products must still land somewhere valid
+        con.execute("INSERT INTO designs (phrase) VALUES ('dog dad')")
+        row = con.execute("SELECT product FROM designs").fetchone()
+    assert row["product"] == "tee"

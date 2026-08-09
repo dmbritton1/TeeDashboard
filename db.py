@@ -37,6 +37,7 @@ MIGRATIONS = (
     ("test", "ALTER TABLE designs ADD COLUMN test INTEGER NOT NULL DEFAULT 0"),
     ("prompt", "ALTER TABLE designs ADD COLUMN prompt TEXT"),
     ("progress", "ALTER TABLE designs ADD COLUMN progress INTEGER NOT NULL DEFAULT 0"),
+    ("product", "ALTER TABLE designs ADD COLUMN product TEXT NOT NULL DEFAULT 'tee'"),
 )
 
 
