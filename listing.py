@@ -6,6 +6,10 @@ enforced here rather than trusted to the model: asked for "13 tags under 20
 characters" it returns 15 tags and a 24-character one.
 """
 
+import db
+import pipeline
+import refine
+
 # Etsy's caps. Documented values, not verified against this account.
 TITLE_MAX = 140
 TAG_MAX = 20
@@ -56,6 +60,69 @@ def clean_tags(raw: str) -> list[str]:
         if tag and len(tag) <= TAG_MAX and tag not in out:
             out.append(tag)
     return out[:TAG_COUNT]
+
+
+DEFAULT_LISTING_PROMPT = (
+    "You write Etsy listings for a print-on-demand shop. Given a design concept "
+    "for a {product}, reply with exactly three lines and nothing else:\n"
+    "TITLE: up to 140 characters of comma-separated keyword phrases a shopper "
+    "would actually type, most valuable phrase first.\n"
+    "TAGS: exactly 13 comma-separated search keywords, each under 20 characters, "
+    "lower case, no repetition of the same word.\n"
+    "HOOK: two or three sentences describing this specific artwork to a shopper. "
+    "Describe only what is in the image. Never mention paper, size, framing, "
+    "shipping or returns - those are added separately and anything you invent "
+    "about them would be a false promise to a buyer."
+)
+
+# Keyed by settings key, same habit as refine.DEFAULTS: main can resolve
+# "saved value or default" with one lookup.
+DEFAULTS = {"listing_prompt": DEFAULT_LISTING_PROMPT}
+
+
+def _client(key: str):
+    """Split out so tests can stand in for the SDK without touching the network."""
+    from google import genai
+
+    return genai.Client(api_key=key)
+
+
+def generate(phrase: str, filters: str, product: str | None, context: str,
+             recent_tags: list[str], system_prompt: str) -> dict:
+    """One Gemma call -> {title, tags, hook}, each key present only if usable.
+
+    Raises RuntimeError when nothing at all parsed, so the caller can fall back
+    wholesale - the same contract as refine.refine.
+    """
+    key = db.get_setting("gemini_api_key")
+    if not key:
+        raise RuntimeError("No Gemini API key configured")
+
+    label = pipeline.product_data(product)["label"]
+    # Gemma on the Gemini API has no system role, so fold it into the content.
+    system = system_prompt.replace("{product}", label)
+    brief = phrase if not filters else "%s\nStyle keywords: %s" % (phrase, filters)
+    if context.strip():
+        brief += "\nShop context: %s" % context.strip()
+    if recent_tags:
+        brief += "\nAvoid reusing these tags: %s" % ", ".join(recent_tags)
+
+    resp = _client(key).models.generate_content(
+        model=refine.GEMMA_MODEL,
+        contents="%s\n\nWrite the listing for this design:\n%s" % (system, brief),
+    )
+
+    fields = _parse(resp.text or "")
+    out = {}
+    if title := clamp_title(fields.get("title", "")):
+        out["title"] = title
+    if tags := clean_tags(fields.get("tags", "")):
+        out["tags"] = tags
+    if hook := fields.get("hook", "").strip():
+        out["hook"] = hook
+    if not out:
+        raise RuntimeError("Gemma returned no usable listing copy")
+    return out
 
 
 if __name__ == "__main__":

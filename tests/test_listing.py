@@ -58,3 +58,96 @@ def test_clean_tags_caps_the_count_at_thirteen():
 def test_clean_tags_of_nothing_is_empty():
     assert listing.clean_tags("") == []
     assert listing.clean_tags("  ,  , ") == []
+
+
+import db
+import pipeline
+import pytest
+
+
+class _FakeModels:
+    def __init__(self, text): self.text = text; self.seen = None
+    def generate_content(self, model, contents):
+        self.seen = contents
+        return type("R", (), {"text": self.text})()
+
+
+def _fake_genai(monkeypatch, text):
+    """Stand in for google.genai so no network or key is needed."""
+    models = _FakeModels(text)
+    client = type("C", (), {"models": models})()
+    monkeypatch.setattr(listing, "_client", lambda key: client)
+    return models
+
+
+def _db(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "test.db"))
+    db.init()
+    db.set_setting("gemini_api_key", "k")
+
+
+def test_generate_returns_all_three_fields(tmp_path, monkeypatch):
+    _db(tmp_path, monkeypatch)
+    _fake_genai(monkeypatch, "TITLE: A Print, Wall Art\nTAGS: a tag, b tag\nHOOK: Nice art.")
+    out = listing.generate("lighthouse", "vintage", "poster", "", [],
+                           listing.DEFAULT_LISTING_PROMPT)
+    assert out == {"title": "A Print, Wall Art", "tags": ["a tag", "b tag"], "hook": "Nice art."}
+
+
+def test_generate_omits_a_field_it_could_not_parse(tmp_path, monkeypatch):
+    _db(tmp_path, monkeypatch)
+    _fake_genai(monkeypatch, "TITLE: Only A Title")
+    out = listing.generate("lighthouse", "", "poster", "", [],
+                           listing.DEFAULT_LISTING_PROMPT)
+    assert out == {"title": "Only A Title"}
+    assert "hook" not in out and "tags" not in out
+
+
+def test_generate_raises_when_nothing_parses(tmp_path, monkeypatch):
+    _db(tmp_path, monkeypatch)
+    _fake_genai(monkeypatch, "Sorry, I cannot help with that.")
+    with pytest.raises(RuntimeError, match="no usable"):
+        listing.generate("x", "", "tee", "", [], listing.DEFAULT_LISTING_PROMPT)
+
+
+def test_generate_raises_without_a_key(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    db.init()
+    with pytest.raises(RuntimeError, match="key"):
+        listing.generate("x", "", "tee", "", [], listing.DEFAULT_LISTING_PROMPT)
+
+
+def test_generate_names_the_product_in_the_prompt(tmp_path, monkeypatch):
+    _db(tmp_path, monkeypatch)
+    models = _fake_genai(monkeypatch, "TITLE: t")
+    listing.generate("lighthouse", "", "poster", "", [], listing.DEFAULT_LISTING_PROMPT)
+    assert pipeline.PRODUCTS["poster"]["label"] in models.seen
+
+
+def test_generate_includes_context_and_avoided_tags_when_given(tmp_path, monkeypatch):
+    _db(tmp_path, monkeypatch)
+    models = _fake_genai(monkeypatch, "TITLE: t")
+    listing.generate("lighthouse", "bold", "tee", "gifts for new homes", ["old tag"],
+                     listing.DEFAULT_LISTING_PROMPT)
+    assert "gifts for new homes" in models.seen
+    assert "old tag" in models.seen
+    assert "bold" in models.seen
+
+
+def test_generate_omits_those_lines_when_empty(tmp_path, monkeypatch):
+    _db(tmp_path, monkeypatch)
+    models = _fake_genai(monkeypatch, "TITLE: t")
+    listing.generate("lighthouse", "", "tee", "", [], listing.DEFAULT_LISTING_PROMPT)
+    assert "Shop context" not in models.seen
+    assert "Avoid reusing" not in models.seen
+
+
+def test_default_prompt_forbids_invented_facts():
+    p = listing.DEFAULT_LISTING_PROMPT.lower()
+    for banned in ("paper", "shipping", "framing", "returns"):
+        assert banned in p, "the prompt must name %s as something never to write" % banned
+
+
+def test_defaults_cover_the_settings_key():
+    assert listing.DEFAULTS["listing_prompt"] is listing.DEFAULT_LISTING_PROMPT
