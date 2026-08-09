@@ -26,14 +26,22 @@ def process_next() -> bool:
         )
     try:
         # A refined Gemma prompt (or a raw Test-tab prompt) is used verbatim;
-        # otherwise wrap the phrase in the t-shirt template.
-        prompt = row["prompt"] or (row["phrase"] if row["test"] else pipeline.build_prompt(row["phrase"], row["filters"]))
+        # otherwise wrap the phrase in the product's template.
+        product = row["product"] or pipeline.DEFAULT_PRODUCT
+        prompt = row["prompt"] or (
+            row["phrase"] if row["test"]
+            else pipeline.build_prompt(row["phrase"], row["filters"], product)
+        )
 
         def on_step(pct):
             with db.connect() as con:
                 con.execute("UPDATE designs SET progress = ? WHERE id = ?", (pct, row["id"]))
 
-        png = pipeline.generate_image_local(prompt, on_step=on_step)
+        png = pipeline.generate_image_local(
+            prompt, on_step=on_step,
+            size=pipeline.product_size(product),
+            decode_share=pipeline.product_data(product)["decode_share"],
+        )
         os.makedirs(DESIGNS_DIR, exist_ok=True)
         with open(os.path.join(DESIGNS_DIR, "%d.png" % row["id"]), "wb") as f:
             f.write(png)
