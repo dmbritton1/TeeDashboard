@@ -366,3 +366,30 @@ def test_settings_roundtrips_the_poster_refine_prompt(tmp_path, monkeypatch):
     assert main.get_settings()["refine_prompt_poster"] == refine.DEFAULT_REFINE_PROMPT_POSTER
     main.save_settings(main.SettingsBody(refine_prompt_poster="my poster prompt"))
     assert main.get_settings()["refine_prompt_poster"] == "my poster prompt"
+
+
+def test_generate_hands_gemma_the_posters_system_prompt(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    import refine
+    seen = {}
+
+    def fake(phrase, filters, n, system_prompt):
+        seen["sp"] = system_prompt
+        return ["a refined prompt"]
+
+    monkeypatch.setattr(refine, "refine", fake)
+    main.generate(main.GenerateBody(text="a lighthouse", variations=1,
+                                    refine=True, product="poster"))
+    assert seen["sp"] == refine.DEFAULT_REFINE_PROMPT_POSTER
+
+
+def test_publish_refuses_a_poster_with_no_blueprint(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    db.set_setting("printify_api_token", "tok")
+    db.set_setting("printify_shop_id", "99")
+    did = insert("approved", product="poster", file="designs/1.png",
+                 print_file="designs/1_print.png")
+    with pytest.raises(HTTPException) as e:
+        main.publish(did)
+    assert e.value.status_code == 400
+    assert "blueprint" in e.value.detail.lower()

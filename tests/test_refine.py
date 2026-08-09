@@ -1,4 +1,5 @@
 import db
+import pipeline
 import refine
 
 
@@ -33,3 +34,9 @@ def test_poster_refine_prompt_is_wall_art_not_garment():
 def test_refine_defaults_cover_every_settings_key():
     assert refine.DEFAULTS["refine_prompt"] is refine.DEFAULT_REFINE_PROMPT
     assert refine.DEFAULTS["refine_prompt_poster"] is refine.DEFAULT_REFINE_PROMPT_POSTER
+
+
+def test_every_products_refine_key_has_a_default():
+    # a product whose refine_key is missing from DEFAULTS is a KeyError -> HTTP
+    # 500 in main.generate, so check the registry against DEFAULTS wholesale
+    assert {d["refine_key"] for d in pipeline.PRODUCTS.values()} <= set(refine.DEFAULTS)
