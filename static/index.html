@@ -44,7 +44,7 @@
   <div id="orb" class="orb" title="Generation activity"><span id="orb_count" class="orb-count"></span></div>
   <aside>
     <div class="brand">
-      <p class="eyebrow">T-shirt design house</p>
+      <p class="eyebrow">Print design house</p>
       <h1>Compound</h1>
       <div class="rule" aria-hidden="true"><span class="gem"></span></div>
     </div>
@@ -85,6 +85,11 @@
       <section class="panel">
         <div class="panel-label">Commission ideas — one per line: phrase | style</div>
         <textarea id="input" placeholder="funny fishing shirt | vintage, distressed, black shirt&#10;plant mom | retro 70s, floral"></textarea>
+        <div class="row">
+          <label for="product_select" style="min-width:0">Product</label>
+          <select id="product_select" onchange="productChanged()"></select>
+          <span class="hint" id="product_state"></span>
+        </div>
         <div class="row">
           <label for="style_select" style="min-width:0">Art style</label>
           <select id="style_select"><option value="">None — use my own style words</option></select>
@@ -147,8 +152,12 @@
         <div class="panel-label">Raw prompt — sent to the model exactly as written</div>
         <textarea id="testInput" placeholder="a red dragon coiled around a sword, vintage tattoo style"></textarea>
         <div class="row">
+          <label for="test_product_select" style="min-width:0">Product</label>
+          <select id="test_product_select"></select>
+        </div>
+        <div class="row">
           <button class="gilt" onclick="generateTest()">Generate image</button>
-          <span class="hint" id="testHint">no t-shirt template · jumps the queue · never enters the pipeline</span>
+          <span class="hint" id="testHint">no product template · jumps the queue · never enters the pipeline</span>
         </div>
       </section>
       <div id="test_grid"></div>
@@ -171,6 +180,11 @@
         <div class="row">
           <label>Shop ID</label>
           <input type="text" id="printify_shop" placeholder="shop id" style="width:140px">
+        </div>
+        <div class="row">
+          <label>Poster blueprint ID</label>
+          <input type="text" id="printify_poster_blueprint" placeholder="Printify blueprint id" style="width:140px">
+          <span class="hint" id="poster_blueprint_state"></span>
         </div>
         <div class="row">
           <button onclick="saveSettings()">Save</button>
@@ -208,6 +222,11 @@
           <label for="model_select">Image model</label>
           <select id="model_select" onchange="saveModel()"></select>
           <span class="hint" id="model_state"></span>
+        </div>
+        <div class="row">
+          <label for="poster_size_select">Poster size</label>
+          <select id="poster_size_select" onchange="savePosterSize()"></select>
+          <span class="hint" id="poster_size_state">50x70cm · 960x1344 is the only size measured working on this card</span>
         </div>
         <div class="hint" id="gen_info">loading…</div>
       </section>

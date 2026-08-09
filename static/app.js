@@ -203,6 +203,19 @@ function findDuplicates(items) {
   return items.filter(([p]) => known.has(p.trim().toLowerCase()));
 }
 
+let products = {};
+async function loadProducts() {
+  try {
+    products = await api("/api/products");
+    const opts = Object.entries(products).map(([name, p]) =>
+      `<option value="${name}">${p.label}</option>`).join("");
+    document.getElementById("product_select").innerHTML = opts;
+    document.getElementById("test_product_select").innerHTML = opts;
+    productChanged();
+  } catch (e) {}
+}
+loadProducts();
+
 async function queueItems(items) {
   const dups = findDuplicates(items);
   if (dups.length) {
@@ -220,7 +233,8 @@ async function queueItems(items) {
   const text = items.map(([p, f]) => f ? `${p} | ${f}` : p).join("\n");
   const style = document.getElementById("style_select").value;
   const refine = document.getElementById("refine_toggle").checked;
-  const res = await api("/api/generate", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text, style, refine})});
+  const product = document.getElementById("product_select").value;
+  const res = await api("/api/generate", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text, style, refine, product})});
   if (refine && res.refined === false)
     flash("Gemma refinement was skipped — generated from the basic template instead.");
   else
@@ -255,6 +269,7 @@ async function saveSettings() {
     gemini_api_key: document.getElementById("gemini_key").value,
     printify_api_token: document.getElementById("printify_token").value,
     printify_shop_id: document.getElementById("printify_shop").value,
+    printify_poster_blueprint_id: document.getElementById("printify_poster_blueprint").value,
     access_code: code,
   };
   try {
@@ -302,6 +317,16 @@ async function saveModel() {
       body: JSON.stringify({image_model: el.value})});
     // the worker loads the model lazily, so the switch lands on the next image
     state.textContent = "saved — applies to the next image (first run downloads weights)";
+  } catch (e) { state.textContent = "✗ " + e.message; }
+}
+async function savePosterSize() {
+  const el = document.getElementById("poster_size_select");
+  const state = document.getElementById("poster_size_state");
+  try {
+    await api("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({poster_size: el.value})});
+    // the worker reads the size per image, so it lands on the next one
+    state.textContent = "saved — applies to the next poster";
   } catch (e) { state.textContent = "✗ " + e.message; }
 }
 async function removeDesign(btn, id, verb) {
@@ -401,12 +426,20 @@ let creepId = null, creepVal = 0;
 function progressBar(d) {
   return `<div class="progress"><div class="bar" data-id="${d.id}" style="width:${Math.max(2, d.progress || 0)}%"></div></div>`;
 }
+// How far ahead of the last reported step the bar is allowed to drift, and how
+// fast. A tee reports a step every few seconds, so 18% of lead at 0.4/tick covers
+// the gaps - those are the numbers this has always used. A poster's steps all
+// land in the first five seconds and then nothing reports for ~19 minutes, so its
+// lead has to span the rest of the bar, slowly enough to outlast the decode
+// (0.008 per 120ms tick crosses 91% in about 23 minutes).
+const CREEP = {tee: {lead: 18, perTick: 0.4}, poster: {lead: 91, perTick: 0.008}};
 function creepTick() {
   const active = designs.find(d => d.status === "generating");
   if (!active) { creepId = null; creepVal = 0; return; }
   if (active.id !== creepId) { creepId = active.id; creepVal = active.progress || 0; }
-  const target = Math.min((active.progress || 0) + 18, 96);   // lead ahead, capped
-  creepVal = Math.max(creepVal, Math.min(target, creepVal + 0.4));  // monotonic, always drifting up
+  const c = CREEP[active.product] || CREEP.tee;
+  const target = Math.min((active.progress || 0) + c.lead, 96);
+  creepVal = Math.max(creepVal, Math.min(target, creepVal + c.perTick));
   const bar = document.querySelector(`.bar[data-id="${creepId}"]`);
   if (bar) bar.style.width = Math.max(2, creepVal) + "%";
 }
@@ -418,9 +451,13 @@ function card(d) {
   const pick = d.status === "pending"
     ? `<input type="checkbox" class="pick" ${selected.has(d.id) ? "checked" : ""} onclick="togglePick(${d.id}, this.checked)">`
     : "";
+  const eta = (products[d.product || "tee"] || {}).eta_minutes;
+  const working = generating
+    ? "in press…" + (d.status === "generating" ? progressBar(d) : "")
+    : "no image";
   const img = d.file
     ? `<img src="/${d.file}" loading="lazy" alt="${esc(d.phrase)}">`
-    : `<div class="placeholder ${generating ? "working" : ""}">${generating ? "in press…" + (d.status === "generating" ? progressBar(d) : "") : "no image"}</div>`;
+    : `<div class="placeholder ${generating ? "working" : ""}" title="${eta ? "about " + eta + " min on this GPU" : ""}">${working}</div>`;
   const buttons = {
     pending: `<button class="gilt" onclick="act(this,${d.id},'approve')">✓ Approve</button><button onclick="act(this,${d.id},'reject')">✕ Reject</button><button onclick="act(this,${d.id},'regenerate')">↻ Regenerate</button>`,
     approved: (stat.printify_ready
@@ -431,7 +468,7 @@ function card(d) {
     failed: `<button onclick="act(this,${d.id},'retry')">↻ Retry</button><button onclick="removeDesign(this,${d.id},'delete')">🗑 Delete</button>`,
     rejected: `<button onclick="act(this,${d.id},'retry')">↻ Re-queue</button><button onclick="act(this,${d.id},'unreview')">↩ Back to review</button><button onclick="removeDesign(this,${d.id},'delete')">🗑 Delete</button>`,
   }[d.status] || "";
-  return `<div class="card${selected.has(d.id) ? " selected" : ""}" data-id="${d.id}"><div class="frame">${pick}${img}</div><div class="body"><div class="phrase">${esc(d.phrase)}</div>` +
+  return `<div class="card${selected.has(d.id) ? " selected" : ""}" data-id="${d.id}" data-product="${d.product || "tee"}"><div class="frame">${pick}${img}</div><div class="body"><div class="phrase">${esc(d.phrase)}</div>` +
     `<div class="filters">${esc(d.filters)}</div>` +
     promptLine(d) +
     (d.error ? `<div class="error">${esc(d.error)}</div>` : "") +
@@ -613,7 +650,7 @@ function libCard(d) {
   const img = d.file
     ? `<img src="/${d.file}" loading="lazy" alt="${esc(d.phrase)}" onclick="openLightbox(${d.id})" style="cursor:zoom-in">`
     : `<div class="placeholder">no image</div>`;
-  return `<div class="card"><div class="frame">${img}</div><div class="body">` +
+  return `<div class="card" data-product="${d.product || "tee"}"><div class="frame">${img}</div><div class="body">` +
     `<div class="phrase">${esc(d.phrase)}</div>` +
     `<div class="filters">${tagsOf(d).map(t => `<span class="chip" onclick="toggleSet(libState.tags,'${esc(t)}')">${esc(t)}</span>`).join("")}</div>` +
     `</div><div class="actions" style="justify-content:space-between">` +
@@ -641,7 +678,8 @@ async function generateTest() {
   if (!text) return;
   const hint = document.getElementById("testHint");
   try {
-    await api("/api/test", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text})});
+    const product = document.getElementById("test_product_select").value;
+    await api("/api/test", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text, product})});
     // the prompt stays put so you can tweak a word and fire again
     hint.textContent = "queued ✓ · a few minutes per image on this GPU";
   } catch (e) { alert(e.message); }
@@ -659,7 +697,7 @@ function testCard(d) {
   const img = d.file
     ? `<img src="/${d.file}" loading="lazy" alt="${esc(d.phrase)}" onclick="openLightbox(${d.id})" style="cursor:zoom-in">`
     : `<div class="placeholder ${generating ? "working" : ""}">${generating ? "in press…" + (d.status === "generating" ? progressBar(d) : "") : (d.error ? "failed" : "no image")}</div>`;
-  return `<div class="card"><div class="frame">${img}</div>` +
+  return `<div class="card" data-product="${d.product || "tee"}"><div class="frame">${img}</div>` +
     `<div class="body"><div class="filters" style="white-space:pre-wrap">${esc(d.phrase)}</div>` +
     (d.error ? `<div class="error">${esc(d.error)}</div>` : "") +
     `</div><div class="actions">` +
@@ -800,12 +838,24 @@ function flash(msg, actionLabel, action) {
   toastTimer = setTimeout(() => { t.hidden = true; }, 5000);
 }
 
+// One textarea, two system prompts. It always saves to the product it was
+// written for, so switching the dropdown can never move your edits onto the
+// other product.
+let refinePrompts = {}, refineProduct = "tee";
+function productChanged() {
+  const name = document.getElementById("product_select").value || "tee";
+  refineProduct = name;
+  document.getElementById("refine_box").value = refinePrompts[name] || "";
+  const p = products[name] || {};
+  document.getElementById("product_state").textContent =
+    p.eta_minutes ? `about ${p.eta_minutes} min per image on this GPU` : "";
+}
+
 let promptSaveTimer, promptLoaded = false;
 async function loadPrompt() {
   try {
     const s = await api("/api/settings");
     document.getElementById("prompt_box").value = s.prompt_template;
-    document.getElementById("refine_box").value = s.refine_prompt || "";
     document.getElementById("key_state").textContent = s.gemini_api_key ? "key saved ✓" : "no key saved";
     const sel = document.getElementById("model_select");
     const LABELS = {zimage: "Z-Image-Turbo (8-bit)"};
@@ -813,6 +863,13 @@ async function loadPrompt() {
       `<option value="${m}" ${m === s.image_model ? "selected" : ""}>${LABELS[m] || m}</option>`).join("");
     document.getElementById("speed_toggle").checked = !!s.speed_production;
     showSpeedState(s.image_size);
+    refinePrompts = {tee: s.refine_prompt || "", poster: s.refine_prompt_poster || ""};
+    productChanged();
+    const ps = document.getElementById("poster_size_select");
+    ps.innerHTML = (s.poster_sizes || []).map(o =>
+      `<option value="${o.value}" ${o.value === s.poster_size ? "selected" : ""}>${o.label}</option>`).join("");
+    document.getElementById("poster_blueprint_state").textContent =
+      s.printify_poster_blueprint_id ? "blueprint saved ✓" : "not set — posters can't publish yet";
     promptLoaded = true;
   } catch (e) {}
 }
@@ -831,9 +888,11 @@ document.getElementById("refine_box").addEventListener("input", () => {
   if (!promptLoaded) return;
   clearTimeout(refineSaveTimer);
   refineSaveTimer = setTimeout(async () => {
+    const key = refineProduct === "poster" ? "refine_prompt_poster" : "refine_prompt";
+    refinePrompts[refineProduct] = document.getElementById("refine_box").value;
     try {
       await api("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({refine_prompt: document.getElementById("refine_box").value})});
+        body: JSON.stringify({[key]: refinePrompts[refineProduct]})});
     } catch (e) { flash("Couldn't save the system prompt — " + e.message); }
   }, 600);
 });

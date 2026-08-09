@@ -190,6 +190,9 @@ label { font-size: 13px; color: var(--stone); min-width: 108px; }
   aspect-ratio: 1; color: var(--stone); font-size: 12px; font-family: var(--mono);
   background: #0e0c0a;
 }
+/* Posters are the ladder's exact 5:7; the tee rule above is untouched. */
+.card[data-product="poster"] img,
+.card[data-product="poster"] .placeholder { aspect-ratio: 5 / 7; }
 .placeholder.working {
   background: linear-gradient(120deg, #12100d 42%, #33280f 50%, #12100d 58%);
   background-size: 240% 100%; animation: sheen 2.8s ease-in-out infinite;
