@@ -31,9 +31,19 @@ def insert(status="pending", **kw):
         return cur.lastrowid
 
 
+@pytest.fixture(autouse=True)
+def _stub_listing_write(monkeypatch):
+    """Default every test to a no-op listing.write so a test calling
+    main.approve() without its own stub can't spawn a real daemon thread -
+    one that leaks past teardown would write into the developer's real
+    designs.db (db.connect() reads db.DB_PATH at call time, after the
+    monkeypatch this fixture applies has already been undone). The two tests
+    that specifically exercise write() override this in their own body."""
+    monkeypatch.setattr(listing, "write", lambda design_id: None)
+
+
 def test_approve_sets_reviewed_at(tmp_path, monkeypatch):
     main = load_main(tmp_path, monkeypatch)
-    monkeypatch.setattr(main.listing, "write", lambda design_id: None)
     did = insert("pending")
     main.approve(did)
     with db.connect() as con:
@@ -123,6 +133,23 @@ def test_publish_stores_product_id(tmp_path, monkeypatch):
     with db.connect() as con:
         row = con.execute("SELECT * FROM designs WHERE id = ?", (did,)).fetchone()
     assert row["status"] == "published" and row["product_id"] == "prod-123"
+
+
+def test_publish_guard_survives_a_listing_failure(tmp_path, monkeypatch):
+    """error doubles as the signal upscale uses to release the publish gate
+    (main.py's `if not row["print_file"] and ...` check). A listing-copy
+    failure also writes to `error`, but must never be mistaken for an
+    upscale failure - the governing rule is that a copywriting failure must
+    never change what publish does. With print_file still NULL, this must
+    still 409 instead of publishing the low-resolution fallback art."""
+    main = load_main(tmp_path, monkeypatch)
+    db.set_setting("printify_api_token", "t")
+    db.set_setting("printify_shop_id", "s")
+    did = insert("approved", error="listing copy failed: quota exhausted")
+    with pytest.raises(HTTPException) as e:
+        main.publish(did)
+    assert e.value.status_code == 409
+    assert "upscal" in e.value.detail.lower()
 
 
 def test_settings_roundtrips_prompt_template(tmp_path, monkeypatch):

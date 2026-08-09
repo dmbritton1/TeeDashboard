@@ -185,7 +185,7 @@ def list_designs():
 
 
 @app.patch("/api/designs/{design_id}")
-def patch_design(design_id: int, body: PatchBody):
+def patch_design(design_id: int, body: PatchBody, _gate: None = Depends(require_access_code)):
     sets, vals = [], []
     if body.tags is not None:
         sets.append("tags = ?")
@@ -312,7 +312,7 @@ def publish(design_id: int, _gate: None = Depends(require_access_code)):
     if not (db.get_setting(data["blueprint_key"]) or data["blueprint_default"]):
         raise HTTPException(400, "No Printify blueprint configured for %s - "
                                  "add one in settings" % data["label"])
-    if not row["print_file"] and not row["error"]:
+    if not row["print_file"] and "upscale failed" not in (row["error"] or ""):
         raise HTTPException(409, "Design is still upscaling - try again shortly")
     row = dict(row)
     if row["file"]:

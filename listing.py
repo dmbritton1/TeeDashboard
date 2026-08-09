@@ -170,13 +170,25 @@ def write(design_id: int) -> None:
                 recent_tags(),
                 db.get_setting("listing_prompt") or DEFAULT_LISTING_PROMPT,
             )
-            with db.connect() as con:
-                con.execute(
-                    "UPDATE designs SET listing_title = ?, listing_tags = ?, "
-                    "listing_hook = ?, error = NULL WHERE id = ?",
-                    (out.get("title", ""), ",".join(out.get("tags", [])),
-                     out.get("hook", ""), design_id),
-                )
+            # Only set columns for fields Gemma actually returned - a partial
+            # generation (e.g. title only) must leave the others as they were,
+            # not blank out a hand-edit or an earlier successful field. Also
+            # never touch `error` here: that column doubles as upscale's
+            # completion signal (main.py's publish guard), and a copywriting
+            # success clearing a real upscale failure would silently release
+            # the publish gate while print_file is still NULL.
+            cols = {"title": "listing_title", "tags": "listing_tags", "hook": "listing_hook"}
+            sets, vals = [], []
+            for key, col in cols.items():
+                if key in out:
+                    sets.append("%s = ?" % col)
+                    vals.append(",".join(out["tags"]) if key == "tags" else out[key])
+            if sets:
+                with db.connect() as con:
+                    con.execute(
+                        "UPDATE designs SET %s WHERE id = ?" % ", ".join(sets),
+                        (*vals, design_id),
+                    )
         except Exception as e:
             with db.connect() as con:
                 con.execute(

@@ -200,6 +200,39 @@ def test_write_records_the_error_and_leaves_the_design_alone_on_failure(tmp_path
     assert row["listing_title"] is None
 
 
+def test_write_success_does_not_clear_an_existing_upscale_failure(tmp_path, monkeypatch):
+    """`error` doubles as main.py's publish-gate signal for upscale
+    ("upscale failed: ..." means stop waiting and publish the fallback art).
+    A listing-copy success must never clear that message - doing so would
+    silently release the publish gate while print_file is still NULL."""
+    _db(tmp_path, monkeypatch)
+    _seed()
+    with db.connect() as con:
+        con.execute("UPDATE designs SET error = ? WHERE id = 1", ("upscale failed: OOM",))
+    monkeypatch.setattr(listing, "generate",
+                        lambda *a, **k: {"title": "T", "tags": ["a", "b"], "hook": "H"})
+    _write_sync(monkeypatch, 1)
+    row = _row()
+    assert row["error"] == "upscale failed: OOM"
+    assert row["listing_title"] == "T"      # the copy itself still saved
+
+
+def test_write_partial_generation_leaves_existing_fields_intact(tmp_path, monkeypatch):
+    """The failure-table promise is "operator edited the copy -> edits win";
+    a partial generation (e.g. only the title parsed) must not blank out a
+    column Gemma didn't return, whether that column held a hand-edit or an
+    earlier successful field."""
+    _db(tmp_path, monkeypatch)
+    _seed()
+    with db.connect() as con:
+        con.execute("UPDATE designs SET listing_hook = ? WHERE id = 1", ("Hand-written hook.",))
+    monkeypatch.setattr(listing, "generate", lambda *a, **k: {"title": "New Title"})
+    _write_sync(monkeypatch, 1)
+    row = _row()
+    assert row["listing_title"] == "New Title"
+    assert row["listing_hook"] == "Hand-written hook."
+
+
 def test_write_is_a_no_op_for_a_missing_design(tmp_path, monkeypatch):
     _db(tmp_path, monkeypatch)
     _write_sync(monkeypatch, 999)      # must not raise
