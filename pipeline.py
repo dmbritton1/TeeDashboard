@@ -313,6 +313,11 @@ def poster_size() -> tuple[int, int]:
 # through a lambda rather than naming the function directly: a direct reference
 # would bind the function object at import time, so monkeypatching
 # pipeline.poster_size in a test would silently not take.
+#
+# Three pieces of product knowledge still live in the front end rather than
+# here: the CREEP drift rates in app.js, the refine_key mapping in the
+# refine-box listener, and the 5:7 card rule in styles.css. A third product
+# needs those too.
 PRODUCTS = {
     "tee": {
         "label": "T-shirt",
