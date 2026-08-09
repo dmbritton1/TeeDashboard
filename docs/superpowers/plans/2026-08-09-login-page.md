@@ -131,9 +131,9 @@ Expected: FAIL — `AttributeError: module 'main' has no attribute 'COOKIE'` at 
 Add to the stdlib imports at the top (keep them alphabetical, matching the existing block):
 
 ```python
+import asyncio
 import hashlib
 import hmac
-import time
 import urllib.parse
 ```
 
@@ -197,7 +197,10 @@ async def login(request: Request):
     if not hmac.compare_digest(
         hashlib.sha256(entered.encode()).hexdigest(), COOKIE
     ):
-        time.sleep(1)  # enough to make guessing over a tunnel pointless
+        # enough to make guessing over a tunnel pointless. asyncio.sleep, not
+        # time.sleep: this is the one async handler in the file, and a blocking
+        # sleep here stalls every other request on the single uvicorn worker
+        await asyncio.sleep(1)
         return _login_page("Incorrect password")
     r = RedirectResponse("/", status_code=303)
     # cloudflared terminates TLS and forwards plain http, so trust its header;
