@@ -1,4 +1,5 @@
 """FastAPI server for the t-shirt design pipeline dashboard."""
+import asyncio
 import csv
 import datetime
 import hashlib
@@ -6,7 +7,6 @@ import hmac
 import io
 import os
 import tempfile
-import time
 import urllib.parse
 import zipfile
 
@@ -94,7 +94,7 @@ async def login(request: Request):
     if not hmac.compare_digest(
         hashlib.sha256(entered.encode()).hexdigest(), COOKIE
     ):
-        time.sleep(1)  # enough to make guessing over a tunnel pointless
+        await asyncio.sleep(1)  # enough to make guessing over a tunnel pointless
         return _login_page("Incorrect password")
     r = RedirectResponse("/", status_code=303)
     # cloudflared terminates TLS and forwards plain http, so trust its header;
