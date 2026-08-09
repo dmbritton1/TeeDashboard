@@ -16,6 +16,8 @@
 - `listing.generate` returns a dict where a failed field is **absent**, not empty. Callers use `.get()`, never indexing.
 - Factual claims (paper, size, framing, shipping, returns) come from the operator's `listing_boilerplate` setting only. The model is instructed never to write them.
 - Follow existing house style: no new dependencies, `%`-formatting for SQL/messages as the repo does, tests use `monkeypatch` + `tmp_path` with no network.
+- **`clamp_title` and `clean_tags` are the single enforcement point for Etsy's limits.** They are public (no leading underscore) because `main.py` and `printify.py` both call them. Never re-implement splitting, lower-casing, de-duplication or the `[:13]` cut anywhere else, and never write the literal `13`, `20` or `140` outside `listing.py`.
+- **This worktree has no `.venv`.** Every `.venv/bin/pytest ...` command in this plan must be run as `/Users/dwightbritton/Desktop/Tshirt-dashboard/.venv/bin/pytest ...` from the worktree root. The first invocation is slow (several minutes, iCloud rehydration); later ones are fast. This is expected — do not treat it as a hang.
 - `save_settings` (`main.py:344-346`) skips empty values, so a text setting can be overwritten but not cleared to empty. This is pre-existing behaviour; do not change it in this plan.
 
 ---
@@ -45,7 +47,7 @@ Pure functions only — no network, no database. This is the task that makes the
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `TITLE_MAX = 140`, `TAG_MAX = 20`, `TAG_COUNT = 13`; `_parse(text: str) -> dict[str, str]`; `_clamp_title(s: str) -> str`; `_clean_tags(raw: str) -> list[str]`.
+- Produces: `TITLE_MAX = 140`, `TAG_MAX = 20`, `TAG_COUNT = 13`; `_parse(text: str) -> dict[str, str]`; `clamp_title(s: str) -> str`; `clean_tags(raw: str) -> list[str]`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -78,12 +80,12 @@ def test_parse_skips_a_label_with_no_value():
 
 
 def test_clamp_title_leaves_a_short_title_alone():
-    assert listing._clamp_title("  A Short Title  ") == "A Short Title"
+    assert listing.clamp_title("  A Short Title  ") == "A Short Title"
 
 
 def test_clamp_title_truncates_on_a_comma_boundary():
     long = ", ".join(["keyword phrase here"] * 12)   # well over 140
-    out = listing._clamp_title(long)
+    out = listing.clamp_title(long)
     assert len(out) <= listing.TITLE_MAX
     assert not out.endswith(",")
     assert out in long          # never invents characters
@@ -91,27 +93,27 @@ def test_clamp_title_truncates_on_a_comma_boundary():
 
 
 def test_clamp_title_hard_cuts_when_there_is_no_comma_in_range():
-    out = listing._clamp_title("x" * 200)
+    out = listing.clamp_title("x" * 200)
     assert out == "x" * listing.TITLE_MAX
 
 
 def test_clean_tags_lowercases_trims_and_dedupes():
-    assert listing._clean_tags("Fishing Print, fishing print ,  Angler Gift ") == [
+    assert listing.clean_tags("Fishing Print, fishing print ,  Angler Gift ") == [
         "fishing print", "angler gift"]
 
 
 def test_clean_tags_drops_tags_over_the_character_cap():
-    assert listing._clean_tags("ok tag, this tag is far too long to be allowed") == ["ok tag"]
+    assert listing.clean_tags("ok tag, this tag is far too long to be allowed") == ["ok tag"]
 
 
 def test_clean_tags_caps_the_count_at_thirteen():
     raw = ", ".join("tag%d" % i for i in range(20))
-    assert len(listing._clean_tags(raw)) == listing.TAG_COUNT
+    assert len(listing.clean_tags(raw)) == listing.TAG_COUNT
 
 
 def test_clean_tags_of_nothing_is_empty():
-    assert listing._clean_tags("") == []
-    assert listing._clean_tags("  ,  , ") == []
+    assert listing.clean_tags("") == []
+    assert listing.clean_tags("  ,  , ") == []
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -160,7 +162,7 @@ def _parse(text: str) -> dict[str, str]:
     return out
 
 
-def _clamp_title(s: str) -> str:
+def clamp_title(s: str) -> str:
     """At most TITLE_MAX characters, cut on a comma so it never ends mid-word."""
     s = s.strip()
     if len(s) <= TITLE_MAX:
@@ -170,7 +172,7 @@ def _clamp_title(s: str) -> str:
     return (cut[:comma] if comma > 0 else cut).strip()
 
 
-def _clean_tags(raw: str) -> list[str]:
+def clean_tags(raw: str) -> list[str]:
     """Lower-cased, de-duplicated, over-long ones dropped, capped at TAG_COUNT.
 
     Dropping rather than truncating an over-long tag is deliberate: half a
@@ -188,12 +190,12 @@ if __name__ == "__main__":
     assert _parse("TITLE: a\nTAGS: b\nHOOK: c") == {"title": "a", "tags": "b", "hook": "c"}
     assert _parse("TITLE: first\nTITLE: second")["title"] == "first"
     assert _parse("TITLE:  \nHOOK: real") == {"hook": "real"}
-    assert _clamp_title("x" * 200) == "x" * TITLE_MAX
-    assert _clamp_title("aaa, bbb" + ", ccc" * 60).endswith("ccc")
-    assert len(_clamp_title("aaa, bbb" + ", ccc" * 60)) <= TITLE_MAX
-    assert _clean_tags("A, a, B") == ["a", "b"]
-    assert _clean_tags("x" * 21) == []
-    assert len(_clean_tags(", ".join("t%d" % i for i in range(30)))) == TAG_COUNT
+    assert clamp_title("x" * 200) == "x" * TITLE_MAX
+    assert clamp_title("aaa, bbb" + ", ccc" * 60).endswith("ccc")
+    assert len(clamp_title("aaa, bbb" + ", ccc" * 60)) <= TITLE_MAX
+    assert clean_tags("A, a, B") == ["a", "b"]
+    assert clean_tags("x" * 21) == []
+    assert len(clean_tags(", ".join("t%d" % i for i in range(30)))) == TAG_COUNT
     print("listing self-check ok")
 ```
 
@@ -221,7 +223,7 @@ git commit -m "feat: parse and clamp Etsy listing copy from Gemma output"
 - Modify: `tests/test_listing.py`
 
 **Interfaces:**
-- Consumes: `_parse`, `_clamp_title`, `_clean_tags` from Task 1.
+- Consumes: `_parse`, `clamp_title`, `clean_tags` from Task 1.
 - Produces: `DEFAULT_LISTING_PROMPT: str`; `DEFAULTS: dict[str, str]`; `generate(phrase: str, filters: str, product: str | None, context: str, recent_tags: list[str], system_prompt: str) -> dict`. Returned dict has keys `title` (str), `tags` (list[str]), `hook` (str) — **each present only if it survived parsing**.
 
 - [ ] **Step 1: Write the failing tests**
@@ -329,7 +331,7 @@ Expected: FAIL — `AttributeError: module 'listing' has no attribute 'DEFAULT_L
 
 - [ ] **Step 3: Write the minimal implementation**
 
-Add to `listing.py`, after `_clean_tags` and before `__main__`:
+Add to `listing.py`, after `clean_tags` and before `__main__`:
 
 ```python
 DEFAULT_LISTING_PROMPT = (
@@ -384,9 +386,9 @@ def generate(phrase: str, filters: str, product: str | None, context: str,
 
     fields = _parse(resp.text or "")
     out = {}
-    if title := _clamp_title(fields.get("title", "")):
+    if title := clamp_title(fields.get("title", "")):
         out["title"] = title
-    if tags := _clean_tags(fields.get("tags", "")):
+    if tags := clean_tags(fields.get("tags", "")):
         out["tags"] = tags
     if hook := fields.get("hook", "").strip():
         out["hook"] = hook
@@ -553,7 +555,8 @@ This task fixes the live bug: `printify.py:110` sets `"tags": True` but the prod
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `tests/test_printify.py` (reusing `setup_tmp`, `_fake_api`, `TEE_VARIANTS` already in that file):
+Add `import listing` to `tests/test_printify.py`, then append to it (reusing
+`setup_tmp`, `_fake_api`, `TEE_VARIANTS` already in that file):
 
 ```python
 def _publish(tmp_path, monkeypatch, design):
@@ -581,7 +584,16 @@ def test_publish_caps_the_tags_at_thirteen(tmp_path, monkeypatch):
     setup_tmp(tmp_path, monkeypatch)
     call = _publish(tmp_path, monkeypatch, {
         "listing_tags": ",".join("tag%d" % i for i in range(20))})
-    assert len(call["tags"]) == 13
+    assert len(call["tags"]) == listing.TAG_COUNT
+
+
+def test_publish_reapplies_the_limits_to_whatever_was_stored(tmp_path, monkeypatch):
+    # publish is the last gate: a row edited outside the app still can't ship
+    # an over-long or duplicated tag
+    setup_tmp(tmp_path, monkeypatch)
+    call = _publish(tmp_path, monkeypatch, {
+        "listing_tags": "Dog Dad, dog dad, %s" % ("x" * 25)})
+    assert call["tags"] == ["dog dad"]
 
 
 def test_publish_sends_an_empty_tag_list_when_there_is_no_copy(tmp_path, monkeypatch):
@@ -645,9 +657,13 @@ In `publish`, replace the `title` and `description` entries of the product paylo
             "title": design.get("listing_title")
                      or design["phrase"].title() + " " + data["title_suffix"],
             "description": _description(design),
-            "tags": [t.strip() for t in (design.get("listing_tags") or "").split(",")
-                     if t.strip()][:13],
+            "tags": listing.clean_tags(design.get("listing_tags") or ""),
 ```
+
+Add `import listing` to `printify.py`'s imports. Reusing `clean_tags` rather
+than splitting inline is deliberate: it is the single place that knows Etsy's
+limits, so publish cannot drift from what generation and editing enforce, and
+the literal `13` never appears here.
 
 - [ ] **Step 4: Run the tests**
 
@@ -903,7 +919,7 @@ git commit -m "feat: write listing copy in the background when a design is appro
 - Modify: `tests/test_api.py`
 
 **Interfaces:**
-- Consumes: `listing._clean_tags` from Task 1; the columns from Task 3.
+- Consumes: `listing.clean_tags` from Task 1; the columns from Task 3.
 - Produces: `PATCH /api/designs/{id}` accepting `listing_title`, `listing_tags`, `listing_hook`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -976,11 +992,11 @@ In `patch_design`, after the existing `rating` block and before `if not sets:`:
 ```python
     if body.listing_title is not None:
         sets.append("listing_title = ?")
-        vals.append(listing._clamp_title(body.listing_title))
+        vals.append(listing.clamp_title(body.listing_title))
     if body.listing_tags is not None:
         # hand-typed tags go through the same limits as generated ones
         sets.append("listing_tags = ?")
-        vals.append(",".join(listing._clean_tags(body.listing_tags)))
+        vals.append(",".join(listing.clean_tags(body.listing_tags)))
     if body.listing_hook is not None:
         sets.append("listing_hook = ?")
         vals.append(body.listing_hook.strip())
@@ -1032,15 +1048,16 @@ In `static/app.js`, inside `syncChildren`, change the replace branch:
     } else {
 ```
 
-- [ ] **Step 2: Verify the guard by hand**
+- [ ] **Step 2: Check the guard reads correctly**
 
-Run the server:
+Do **not** start a server. Browser verification is the controller's job after
+all seven tasks land; starting uvicorn here costs several minutes and the
+database has no designs to render.
 
-```bash
-.venv/bin/uvicorn main:app --port 8000
-```
-
-Open http://localhost:8000, focus any text field in a card, and confirm the card does not get rebuilt underneath you across at least two 3-second polls. (With no designs yet, this can also be checked by focusing a field in the Library grid.)
+Instead confirm by reading: `busy` is computed from the element being replaced
+(`el`), not the freshly built one; the guard short-circuits only the
+`replaceWith` branch; and the `insertBefore` reordering below it still runs so
+a focused card can still move position.
 
 - [ ] **Step 3: Commit the guard on its own**
 
@@ -1143,9 +1160,19 @@ Reminder from the Global Constraints: `save_settings` skips empty strings, so
 these can be overwritten but not cleared back to empty. That is pre-existing
 behaviour and is out of scope here.
 
-- [ ] **Step 6: Verify in the browser**
+- [ ] **Step 6: Cross-check the element ids**
 
-With the server running, open http://localhost:8000 → Settings, save a boilerplate and a shop context, reload, and confirm both persist. Then confirm the Listing copy panel's system prompt box is pre-filled with the default.
+No server. Instead grep the two files against each other and confirm every id
+you introduced exists on both sides — a typo here passes every test and
+silently breaks the panel:
+
+```bash
+grep -o 'getElementById("[a-z_]*")' static/app.js | sort -u
+grep -o 'id="[a-z_]*"' static/index.html | sort -u
+```
+
+`shop_context`, `listing_boilerplate` and `listing_prompt` must each appear in
+both lists. Report the two lists in your report so the reviewer can see them.
 
 - [ ] **Step 7: Run the whole suite**
 
