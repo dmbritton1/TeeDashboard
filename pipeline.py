@@ -358,19 +358,20 @@ def product_size(name: str | None) -> tuple[int, int]:
     return product_data(name)["size"]()
 
 
-def step_progress(step_index: int, steps: int,
-                  decode_share: float = 1 / (ZIMAGE_STEPS + 1)) -> int:
+def step_progress(step_index: int, steps: int, decode_share: float | None = None) -> int:
     """Percent to show after finishing step `step_index` (0-based) of `steps`.
 
     `decode_share` is the fraction of the bar reserved for the VAE decode that
-    follows the loop. At the tee default this is arithmetically identical to the
-    old round((i + 1) / (steps + 1) * 100): with 9 steps and a 0.1 share, step 0
-    gives 10 and step 8 gives 90, exactly as before.
+    follows the loop. Omitted, it is 1 / (steps + 1), which makes this exactly the
+    round((step_index + 1) / (steps + 1) * 100) this replaced - for every `steps`,
+    not just the model's 9.
 
     A poster is the reason this is a parameter. Its decode is ~19 of 19.5 minutes
     (MIOpen has no CK grouped-conv library for gfx1031), so a loop that claimed
     90% of the bar in five seconds would read as a hung job for the next nineteen.
     """
+    if decode_share is None:
+        decode_share = 1 / (steps + 1)
     return round((step_index + 1) / steps * (1 - decode_share) * 100)
 
 
@@ -404,11 +405,9 @@ def generate_image_local(prompt: str, on_step=None, size: tuple[int, int] | None
         _pipe = build()
         _pipe_name = name
 
-    share = decode_share if decode_share is not None else 1 / (ZIMAGE_STEPS + 1)
-
     def _cb(pipe, step_index, timestep, kwargs):
         if on_step:
-            on_step(step_progress(step_index, steps, share))
+            on_step(step_progress(step_index, steps, decode_share))
         return kwargs
 
     # current_size() is read per image, so the Speed toggle lands on the next one

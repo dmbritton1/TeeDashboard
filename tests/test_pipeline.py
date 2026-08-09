@@ -40,10 +40,7 @@ def test_prompt_without_filters_has_no_style_clause():
 
 
 def test_step_progress_maps_steps_to_reserved_percent():
-    # decode_share now defaults to a fixed tee constant rather than 1/(steps+1),
-    # so an arbitrary steps=4 needs its matching share spelled out explicitly to
-    # keep reproducing the old round((i + 1) / (steps + 1) * 100) values
-    assert [step_progress(i, 4, decode_share=1 / 5) for i in range(4)] == [20, 40, 60, 80]
+    assert [step_progress(i, 4) for i in range(4)] == [20, 40, 60, 80]
 
 
 def test_step_progress_monotonic_and_below_100():
