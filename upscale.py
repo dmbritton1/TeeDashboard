@@ -23,6 +23,19 @@ def _device():
     return torch.device("cpu")
 
 
+def _job_device():
+    """CPU while a design is generating: the 10GB card can't hold Real-ESRGAN's
+    patches next to a poster's denoise or decode, and generation has no OOM
+    fallback - a fault there loses a 19-minute run. A slow upscale beats that."""
+    import torch
+
+    with db.connect() as con:
+        busy = con.execute(
+            "SELECT 1 FROM designs WHERE status = 'generating' LIMIT 1"
+        ).fetchone()
+    return torch.device("cpu") if busy else _device()
+
+
 def _build_model(device):
     from py_real_esrgan.model import RealESRGAN
 
@@ -50,7 +63,7 @@ def upscale(design_id: int, src_path: str) -> None:
 
                 img = Image.open(src_path).convert("RGB")
                 try:
-                    result = _get_model(_device()).predict(img)
+                    result = _get_model(_job_device()).predict(img)
                 except torch.OutOfMemoryError:
                     # a poster is 1.7x a tee's pixels and 4x output is 3840x5376;
                     # slow on CPU beats no print file at all

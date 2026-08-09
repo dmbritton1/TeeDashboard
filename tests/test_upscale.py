@@ -1,5 +1,6 @@
 import pytest
 
+import db
 import upscale
 
 torch = pytest.importorskip("torch")
@@ -37,3 +38,13 @@ def test_models_are_cached_per_device(monkeypatch):
     assert c is not a and made == ["cpu", "cuda"]
     # and the second device's build must not have evicted the first
     assert upscale._get_model(torch.device("cpu")) is a
+
+
+def test_job_device_steps_aside_while_a_design_is_generating(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "test.db"))
+    db.init()
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    assert upscale._job_device().type == "cuda"   # idle queue: GPU
+    with db.connect() as con:
+        con.execute("INSERT INTO designs (phrase, status) VALUES ('x', 'generating')")
+    assert upscale._job_device().type == "cpu"    # generation in flight: yield
