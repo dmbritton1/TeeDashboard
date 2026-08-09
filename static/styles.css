@@ -152,8 +152,8 @@ button, a.button {
   background: transparent; color: var(--ivory); border: 1px solid var(--vein-grey);
   transition: border-color 0.2s, background 0.2s, color 0.2s;
 }
-button:hover:not(:disabled) { border-color: var(--gold); color: var(--gold-leaf); }
-button:focus-visible { outline: 2px solid var(--gold-soft); outline-offset: 2px; }
+button:hover:not(:disabled), a.button:hover { border-color: var(--gold); color: var(--gold-leaf); }
+button:focus-visible, a.button:focus-visible { outline: 2px solid var(--gold-soft); outline-offset: 2px; }
 button:disabled { opacity: 0.4; cursor: default; }
 button.gilt {
   background: linear-gradient(110deg, #c69c46, #e9d08c 45%, #b98b31);

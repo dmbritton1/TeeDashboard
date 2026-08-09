@@ -68,8 +68,11 @@ def index():
 @app.middleware("http")
 async def require_login(request: Request, call_next):
     """Gate everything but the login page - including the StaticFiles mounts."""
+    # bytes, not str: the ASGI server decodes cookie headers as latin-1, so a
+    # client can hand us non-ASCII, and hmac.compare_digest on str requires
+    # both sides be ASCII-only - it would raise TypeError (a 500) otherwise
     if request.url.path not in OPEN_PATHS and not hmac.compare_digest(
-        request.cookies.get("auth", ""), COOKIE
+        request.cookies.get("auth", "").encode("utf-8", "replace"), COOKIE.encode()
     ):
         # the dashboard JS expects JSON from /api/*, not a page of HTML
         if request.url.path.startswith("/api/"):
@@ -97,7 +100,9 @@ async def login(request: Request):
     if not hmac.compare_digest(
         hashlib.sha256(entered.encode()).hexdigest(), COOKIE
     ):
-        await asyncio.sleep(1)  # enough to make guessing over a tunnel pointless
+        # per-request, not global: concurrent guesses each pay 1s, they don't queue
+        # behind each other. Deters a casual sequential script, nothing more.
+        await asyncio.sleep(1)
         return _login_page("Incorrect password")
     r = RedirectResponse("/", status_code=303)
     # cloudflared terminates TLS and forwards plain http, so trust its header;

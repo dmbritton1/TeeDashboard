@@ -17,6 +17,14 @@ load_dotenv()
 
 PORT = 8000
 TUNNEL_RE = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
+# same wording as main.py's own SystemExit, so the owner sees one consistent
+# instruction regardless of which of the two entry points they used
+NO_PASSWORD_MESSAGE = (
+    "DASHBOARD_PASSWORD is not set, so there would be no lock on the door.\n"
+    "Add this line to your .env file:\n\n"
+    "    DASHBOARD_PASSWORD=pick-something-only-you-two-know\n\n"
+    "then start the dashboard again."
+)
 
 
 def extract_url(line):
@@ -78,6 +86,10 @@ def relay(lines, send):
 
 def main():
     """Run uvicorn and cloudflared together; email the first tunnel URL seen."""
+    # check before spawning anything - otherwise uvicorn exits immediately,
+    # cloudflared still comes up, and we'd email a link to a dead server
+    if not os.environ.get("DASHBOARD_PASSWORD", "").strip():
+        raise SystemExit(NO_PASSWORD_MESSAGE)
     server = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "main:app",
          "--host", "127.0.0.1", "--port", str(PORT)]
@@ -101,6 +113,7 @@ def main():
                     "may already be in use) - the link below likely won't work"
                     % PORT
                 )
+                return  # a link to a dead server is noise, not news
             send_link(url)
 
         relay(tunnel.stdout, send_and_check)

@@ -6,6 +6,10 @@ Gemini (free tier), review them in a dashboard, approve the keepers
 
 ## Run it
 
+Add `DASHBOARD_PASSWORD=...` to `.env` first - the dashboard won't start
+without one, even on localhost. (Details under "Share with a few people"
+below.)
+
     .venv/bin/uvicorn main:app --port 8000
 
 Open http://localhost:8000
@@ -61,7 +65,8 @@ index or torchvision ops will fail to resolve against this torch):
 
     .venv\Scripts\pip install torch torchvision --index-url https://rocm.nightlies.amd.com/v2-staging/gfx103X-dgpu/
 
-Then run the server as usual. The GPU is detected automatically (the status
+Then run the server as usual (it still needs `DASHBOARD_PASSWORD` in `.env` -
+see "Run it" above). The GPU is detected automatically (the status
 bar shows "local GPU"), and the first generation downloads the model
 (~15GB, one time: a 7.2GB 8-bit transformer, an 8GB text encoder, and the VAE). To use the dashboard from another computer, install
 Tailscale (free) on both machines and open `http://<machine-name>:8000`.
@@ -119,7 +124,8 @@ can open it in a browser and queue images. Generation still happens locally.
    The dashboard refuses to start without one. It is the only way in - the
    designs, the images, and the settings are all behind it, not just the
    buttons. Change it by editing this line and restarting; that also signs
-   out everyone who was already in.
+   out everyone who was already in. Make it long rather than clever - a
+   few random words beats one word you'd actually remember.
 2. Install `cloudflared` from Cloudflare's site.
 3. Run:
 

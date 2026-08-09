@@ -71,8 +71,9 @@ This applies on `localhost` as well as over the tunnel. One code path, and a
 ### Wrong password
 
 `POST /login` sleeps 1 second, then re-renders the login page with an
-"Incorrect" message and no cookie. Enough to make guessing over a tunnel
-pointless without building lockout state to maintain.
+"Incorrect" message and no cookie. The sleep is per-request and concurrent,
+so it only slows a sequential guesser, not a parallel one - lockout state is
+out of scope, so password entropy carries the weight instead.
 
 ## Login page
 

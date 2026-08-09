@@ -35,6 +35,18 @@ def test_api_refused_without_cookie():
     assert _anon().get("/api/designs").status_code == 401
 
 
+def test_non_ascii_cookie_is_refused_not_a_500():
+    # cookie headers are decoded latin-1 by the ASGI server, so a client can hand
+    # us a non-ASCII value; hmac.compare_digest on str requires both sides be
+    # ASCII-only and raises TypeError otherwise - TestClient re-raises that as a
+    # 500 by default, so a broken version of this fails loudly here
+    # bytes, not str: httpx's own header encoder rejects non-ASCII str values
+    # before the request ever leaves this process, so raw bytes are needed to
+    # reach the server the way a real client's raw header bytes would
+    r = _anon().get("/api/designs", headers={"Cookie": b"auth=caf\xe9"})
+    assert r.status_code == 401
+
+
 def test_dashboard_redirects_to_login_without_cookie():
     r = _anon().get("/", follow_redirects=False)
     assert r.status_code == 303
@@ -68,6 +80,21 @@ def test_wrong_password_sets_no_cookie():
     assert r.status_code == 200
     assert "Incorrect" in r.text
     assert not a.cookies.get("auth")
+
+
+def test_login_cookie_is_secure_behind_the_tunnel():
+    # cloudflared terminates TLS and forwards plain http - the cookie must still
+    # come back Secure when that header says the original request was https
+    r = _anon().post(
+        "/login", data={"password": "test-password"},
+        headers={"x-forwarded-proto": "https"}, follow_redirects=False,
+    )
+    assert "Secure" in r.headers["set-cookie"]
+
+
+def test_login_cookie_is_not_secure_on_plain_localhost():
+    r = _anon().post("/login", data={"password": "test-password"}, follow_redirects=False)
+    assert "Secure" not in r.headers["set-cookie"]
 
 
 def test_logout_clears_the_cookie():
