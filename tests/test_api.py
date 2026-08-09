@@ -6,6 +6,7 @@ import pytest
 from fastapi import HTTPException
 
 import db
+import pipeline
 import worker
 
 
@@ -276,3 +277,92 @@ def test_generate_refine_off_skips_gemma(tmp_path, monkeypatch):
 def test_settings_returns_refine_prompt_default(tmp_path, monkeypatch):
     main = load_main(tmp_path, monkeypatch)
     assert main.get_settings()["refine_prompt"] == refine.DEFAULT_REFINE_PROMPT
+
+
+def test_products_endpoint_lists_both_with_what_the_ui_needs(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    out = main.list_products()
+    assert set(out) == set(pipeline.PRODUCTS)
+    assert out["poster"]["aspect"] == "5 / 7"
+    assert out["poster"]["eta_minutes"] == 20
+    assert out["tee"]["label"] == "T-shirt"
+
+
+def test_generate_records_the_product_on_every_row(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    main.generate(main.GenerateBody(text="a lighthouse", variations=2,
+                                    refine=False, product="poster"))
+    with db.connect() as con:
+        rows = con.execute("SELECT product FROM designs").fetchall()
+    assert [r["product"] for r in rows] == ["poster", "poster"]
+
+
+def test_generate_defaults_to_tee(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    main.generate(main.GenerateBody(text="dog dad", variations=1, refine=False))
+    with db.connect() as con:
+        assert con.execute("SELECT product FROM designs").fetchone()["product"] == "tee"
+
+
+def test_generate_rejects_an_unknown_product(tmp_path, monkeypatch):
+    # the request body is the one place a bad product should be loud: silently
+    # coercing it would queue 20 minutes of the wrong thing
+    main = load_main(tmp_path, monkeypatch)
+    with pytest.raises(HTTPException) as e:
+        main.generate(main.GenerateBody(text="dog dad", refine=False, product="hoodie"))
+    assert e.value.status_code == 400
+
+
+def test_test_endpoint_records_the_product(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    main.generate_test(main.TestBody(text="a red dragon", product="poster"))
+    with db.connect() as con:
+        assert con.execute("SELECT product FROM designs").fetchone()["product"] == "poster"
+
+
+def test_test_endpoint_rejects_an_unknown_product(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    with pytest.raises(HTTPException) as e:
+        main.generate_test(main.TestBody(text="x", product="hoodie"))
+    assert e.value.status_code == 400
+
+
+def test_regenerate_carries_the_product_forward(tmp_path, monkeypatch):
+    # without this a regenerated poster silently becomes a tee - and you find out
+    # when a 5:7 image comes back square
+    main = load_main(tmp_path, monkeypatch)
+    did = insert("pending", product="poster")
+    main.regenerate(did)
+    with db.connect() as con:
+        rows = con.execute("SELECT product FROM designs ORDER BY id").fetchall()
+    assert [r["product"] for r in rows] == ["poster", "poster"]
+
+
+def test_settings_roundtrips_poster_size(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    assert main.get_settings()["poster_size"] == "960x1344"
+    main.save_settings(main.SettingsBody(poster_size="1120x1568"))
+    assert main.get_settings()["poster_size"] == "1120x1568"
+
+
+def test_settings_offers_every_ladder_rung_with_its_dpi(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    sizes = main.get_settings()["poster_sizes"]
+    assert len(sizes) == len(pipeline.POSTER_LADDER)
+    assert sizes[0]["value"] == "1440x2016"
+    assert "292 dpi" in sizes[0]["label"]
+
+
+def test_settings_roundtrips_the_poster_blueprint(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    assert main.get_settings()["printify_poster_blueprint_id"] is False
+    main.save_settings(main.SettingsBody(printify_poster_blueprint_id="1220"))
+    assert main.get_settings()["printify_poster_blueprint_id"] is True
+
+
+def test_settings_roundtrips_the_poster_refine_prompt(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    import refine
+    assert main.get_settings()["refine_prompt_poster"] == refine.DEFAULT_REFINE_PROMPT_POSTER
+    main.save_settings(main.SettingsBody(refine_prompt_poster="my poster prompt"))
+    assert main.get_settings()["refine_prompt_poster"] == "my poster prompt"

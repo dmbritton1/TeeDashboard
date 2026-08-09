@@ -65,6 +65,7 @@ class GenerateBody(BaseModel):
     variations: int = 2
     style: str = ""
     refine: bool = True
+    product: str = "tee"
 
 
 class PatchBody(BaseModel):
@@ -74,6 +75,7 @@ class PatchBody(BaseModel):
 
 class TestBody(BaseModel):
     text: str
+    product: str = "tee"
 
 
 class SettingsBody(BaseModel):
@@ -87,16 +89,29 @@ class SettingsBody(BaseModel):
     # "on"/"off" rather than a bool: save_settings skips empty values, so a plain
     # false would be indistinguishable from "not sent" and could never be turned off
     speed_production: str = ""
+    poster_size: str = ""
+    printify_poster_blueprint_id: str = ""
+    refine_prompt_poster: str = ""
+
+
+def _product(name: str) -> str:
+    """A product from a request body. Unlike a database value this is loud on
+    nonsense - queueing 20 minutes of the wrong shape is worse than a 400."""
+    if name not in pipeline.PRODUCTS:
+        raise HTTPException(400, "Unknown product: %s" % name)
+    return name
 
 
 @app.post("/api/generate")
 def generate(body: GenerateBody, _gate: None = Depends(require_access_code)):
+    product = _product(body.product)
     items = pipeline.parse_input(body.text)
     if not items:
         raise HTTPException(400, "No valid lines found")
     if _queue_full():
         raise HTTPException(429, "Queue is full - try again shortly")
-    system_prompt = db.get_setting("refine_prompt") or refine.DEFAULT_REFINE_PROMPT
+    refine_key = pipeline.product_data(product)["refine_key"]
+    system_prompt = db.get_setting(refine_key) or refine.DEFAULTS[refine_key]
     refined_any = False
     rows = []  # (phrase, filters, prompt-or-None) — built before opening the DB so the
     # slow Gemma call never holds the sqlite write lock against the worker thread
@@ -115,8 +130,9 @@ def generate(body: GenerateBody, _gate: None = Depends(require_access_code)):
             rows.extend((phrase, filters, None) for _ in range(body.variations))
     with db.connect() as con:
         con.executemany(
-            "INSERT INTO designs (phrase, filters, prompt, status) VALUES (?, ?, ?, 'queued')",
-            rows,
+            "INSERT INTO designs (phrase, filters, prompt, product, status) "
+            "VALUES (?, ?, ?, ?, 'queued')",
+            [(phrase, filters, prompt, product) for phrase, filters, prompt in rows],
         )
     return {"queued": len(rows), "refined": refined_any}
 
@@ -124,6 +140,7 @@ def generate(body: GenerateBody, _gate: None = Depends(require_access_code)):
 @app.post("/api/test")
 def generate_test(body: TestBody, _gate: None = Depends(require_access_code)):
     """Queue one scratch image from the raw prompt - bypasses the t-shirt template and pipeline."""
+    product = _product(body.product)
     text = body.text.strip()
     if not text:
         raise HTTPException(400, "Enter a prompt")
@@ -131,8 +148,9 @@ def generate_test(body: TestBody, _gate: None = Depends(require_access_code)):
         raise HTTPException(429, "Queue is full - try again shortly")
     with db.connect() as con:
         cur = con.execute(
-            "INSERT INTO designs (phrase, filters, status, test) VALUES (?, '', 'queued', 1)",
-            (text,),
+            "INSERT INTO designs (phrase, filters, status, test, product) "
+            "VALUES (?, '', 'queued', 1, ?)",
+            (text, product),
         )
     return {"id": cur.lastrowid}
 
@@ -140,6 +158,16 @@ def generate_test(body: TestBody, _gate: None = Depends(require_access_code)):
 @app.get("/api/styles")
 def list_styles():
     return {group: list(labels) for group, labels in pipeline.STYLE_GROUPS.items()}
+
+
+@app.get("/api/products")
+def list_products():
+    """What the front end needs to draw a product: its name, its card shape, and
+    how long to expect a generation to take."""
+    return {
+        name: {"label": d["label"], "aspect": d["aspect"], "eta_minutes": d["eta_minutes"]}
+        for name, d in pipeline.PRODUCTS.items()
+    }
 
 
 @app.get("/api/designs")
@@ -231,15 +259,15 @@ def retry(design_id: int, _gate: None = Depends(require_access_code)):
 def regenerate(design_id: int, _gate: None = Depends(require_access_code)):
     with db.connect() as con:
         row = con.execute(
-            "SELECT phrase, filters FROM designs WHERE id = ?", (design_id,)
+            "SELECT phrase, filters, product FROM designs WHERE id = ?", (design_id,)
         ).fetchone()
         if not row:
             raise HTTPException(404, "Design not found")
         if _queue_full():
             raise HTTPException(429, "Queue is full - try again shortly")
         con.execute(
-            "INSERT INTO designs (phrase, filters, status) VALUES (?, ?, 'queued')",
-            (row["phrase"], row["filters"]),
+            "INSERT INTO designs (phrase, filters, product, status) VALUES (?, ?, ?, 'queued')",
+            (row["phrase"], row["filters"], row["product"]),
         )
     return {"ok": True}
 
@@ -294,6 +322,16 @@ def get_settings():
     out["image_models"] = list(pipeline.MODELS)
     out["speed_production"] = pipeline.current_size() == pipeline.FAST_SIZE
     out["image_size"] = pipeline.current_size()
+    out["printify_poster_blueprint_id"] = bool(db.get_setting("printify_poster_blueprint_id"))
+    out["refine_prompt_poster"] = (
+        db.get_setting("refine_prompt_poster") or refine.DEFAULT_REFINE_PROMPT_POSTER
+    )
+    out["poster_size"] = "%dx%d" % pipeline.poster_size()
+    out["poster_sizes"] = [
+        {"value": "%dx%d" % (w, h),
+         "label": "%dx%d — %d dpi" % (w, h, pipeline.poster_dpi(w, h))}
+        for w, h in pipeline.POSTER_LADDER
+    ]
     return out
 
 
