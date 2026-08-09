@@ -358,21 +358,34 @@ def product_size(name: str | None) -> tuple[int, int]:
     return product_data(name)["size"]()
 
 
-def step_progress(step_index: int, steps: int) -> int:
+def step_progress(step_index: int, steps: int,
+                  decode_share: float = 1 / (ZIMAGE_STEPS + 1)) -> int:
     """Percent to show after finishing step `step_index` (0-based) of `steps`.
-    Reserves the top of the bar for the VAE decode that follows the loop."""
-    return round((step_index + 1) / (steps + 1) * 100)
+
+    `decode_share` is the fraction of the bar reserved for the VAE decode that
+    follows the loop. At the tee default this is arithmetically identical to the
+    old round((i + 1) / (steps + 1) * 100): with 9 steps and a 0.1 share, step 0
+    gives 10 and step 8 gives 90, exactly as before.
+
+    A poster is the reason this is a parameter. Its decode is ~19 of 19.5 minutes
+    (MIOpen has no CK grouped-conv library for gfx1031), so a loop that claimed
+    90% of the bar in five seconds would read as a hung job for the next nineteen.
+    """
+    return round((step_index + 1) / steps * (1 - decode_share) * 100)
 
 
 _pipe = None
 _pipe_name = None
 
 
-def generate_image_local(prompt: str, on_step=None, size: tuple[int, int] | None = None) -> bytes:
+def generate_image_local(prompt: str, on_step=None, size: tuple[int, int] | None = None,
+                         decode_share: float | None = None) -> bytes:
     """Generate one PNG on the local GPU (needs requirements-local.txt).
     Uses whichever model `image_model` names; on_step(pct) gets an int 0-100.
     `size` is an explicit (width, height) - posters need a non-square one and must
-    not be shrunk by Speed Production. Omit it for the square t-shirt default."""
+    not be shrunk by Speed Production. Omit it for the square t-shirt default.
+    `decode_share` is how much of the progress bar to leave for the VAE decode;
+    omit it for the tee default."""
     global _pipe, _pipe_name
     import io
 
@@ -391,9 +404,11 @@ def generate_image_local(prompt: str, on_step=None, size: tuple[int, int] | None
         _pipe = build()
         _pipe_name = name
 
+    share = decode_share if decode_share is not None else 1 / (ZIMAGE_STEPS + 1)
+
     def _cb(pipe, step_index, timestep, kwargs):
         if on_step:
-            on_step(step_progress(step_index, steps))
+            on_step(step_progress(step_index, steps, share))
         return kwargs
 
     # current_size() is read per image, so the Speed toggle lands on the next one

@@ -40,7 +40,10 @@ def test_prompt_without_filters_has_no_style_clause():
 
 
 def test_step_progress_maps_steps_to_reserved_percent():
-    assert [step_progress(i, 4) for i in range(4)] == [20, 40, 60, 80]
+    # decode_share now defaults to a fixed tee constant rather than 1/(steps+1),
+    # so an arbitrary steps=4 needs its matching share spelled out explicitly to
+    # keep reproducing the old round((i + 1) / (steps + 1) * 100) values
+    assert [step_progress(i, 4, decode_share=1 / 5) for i in range(4)] == [20, 40, 60, 80]
 
 
 def test_step_progress_monotonic_and_below_100():
@@ -454,3 +457,40 @@ def test_build_prompt_style_clause_works_for_both_products():
 
 def test_build_prompt_falls_back_to_tee_on_an_unknown_product():
     assert build_prompt("dog dad", "", "hoodie") == build_prompt("dog dad", "")
+
+
+def test_step_progress_is_unchanged_for_tees():
+    # the old formula was round((i + 1) / (steps + 1) * 100); the new one must be
+    # arithmetically identical at the tee's decode share, not merely close
+    steps = pipeline.ZIMAGE_STEPS
+    for i in range(steps):
+        assert step_progress(i, steps) == round((i + 1) / (steps + 1) * 100)
+
+
+def test_step_progress_still_reserves_the_top_of_the_bar():
+    assert step_progress(pipeline.ZIMAGE_STEPS - 1, pipeline.ZIMAGE_STEPS) == 90
+
+
+def test_step_progress_gives_a_poster_loop_only_its_real_share():
+    # a poster spends ~19 of 19.5 minutes decoding: the loop must not claim 90%
+    # of the bar in five seconds and then sit there
+    steps = pipeline.ZIMAGE_STEPS
+    assert step_progress(steps - 1, steps, decode_share=0.95) == 5
+    assert step_progress(0, steps, decode_share=0.95) == 1
+
+
+def test_generate_passes_the_decode_share_through_to_the_callback(monkeypatch):
+    fake = _fake_loaded_pipe(monkeypatch)
+    seen = []
+    pipeline.generate_image_local("a poster", on_step=seen.append,
+                                  size=(960, 1344), decode_share=0.95)
+    fake.kwargs["callback_on_step_end"](None, pipeline.ZIMAGE_STEPS - 1, None, {})
+    assert seen == [5]
+
+
+def test_generate_without_a_decode_share_reports_like_a_tee(monkeypatch):
+    fake = _fake_loaded_pipe(monkeypatch)
+    seen = []
+    pipeline.generate_image_local("a tee", on_step=seen.append)
+    fake.kwargs["callback_on_step_end"](None, pipeline.ZIMAGE_STEPS - 1, None, {})
+    assert seen == [90]
