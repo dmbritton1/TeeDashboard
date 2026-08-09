@@ -275,6 +275,9 @@ async function saveSettings() {
     printify_shop_id: document.getElementById("printify_shop").value,
     printify_poster_blueprint_id: document.getElementById("printify_poster_blueprint").value,
     access_code: code,
+    shop_context: document.getElementById("shop_context").value,
+    listing_boilerplate: document.getElementById("listing_boilerplate").value,
+    listing_prompt: document.getElementById("listing_prompt").value,
   };
   try {
     await api("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
@@ -454,6 +457,19 @@ function creepTick() {
 }
 setInterval(creepTick, 120);
 
+// Approved designs carry their Etsy copy here. Collapsed by default so the
+// review grid stays a grid; the fields save on blur through the same PATCH
+// route that already handles tags and rating.
+function listingBox(d) {
+  if (d.status !== "approved" && d.status !== "published") return "";
+  const waiting = !d.listing_title && !d.listing_hook && !d.listing_tags;
+  if (waiting && !d.error) return `<div class="prompt none">writing listing copy…</div>`;
+  return `<details class="prompt listing"><summary>listing copy</summary>` +
+    `<label>Title</label><textarea data-f="listing_title" data-id="${d.id}" rows="2">${esc(d.listing_title || "")}</textarea>` +
+    `<label>Tags (13 max)</label><textarea data-f="listing_tags" data-id="${d.id}" rows="2">${esc(d.listing_tags || "")}</textarea>` +
+    `<label>Hook</label><textarea data-f="listing_hook" data-id="${d.id}" rows="4">${esc(d.listing_hook || "")}</textarea>` +
+    `</details>`;
+}
 function card(d) {
 
   const generating = d.status === "queued" || d.status === "generating";
@@ -480,6 +496,7 @@ function card(d) {
   return `<div class="card${selected.has(d.id) ? " selected" : ""}" data-id="${d.id}" data-product="${d.product || "tee"}"><div class="frame">${pick}${img}</div><div class="body"><div class="phrase">${esc(d.phrase)}</div>` +
     `<div class="filters">${esc(d.filters)}</div>` +
     promptLine(d) +
+    listingBox(d) +
     (d.error ? `<div class="error">${esc(d.error)}</div>` : "") +
     `</div><div class="actions">${buttons}</div></div>`;
 }
@@ -880,6 +897,9 @@ async function loadPrompt() {
       `<option value="${o.value}" ${o.value === s.poster_size ? "selected" : ""}>${o.label}</option>`).join("");
     document.getElementById("poster_blueprint_state").textContent =
       s.printify_poster_blueprint_id ? "blueprint saved ✓" : "not set — posters can't publish yet";
+    document.getElementById("shop_context").value = s.shop_context || "";
+    document.getElementById("listing_boilerplate").value = s.listing_boilerplate || "";
+    document.getElementById("listing_prompt").value = s.listing_prompt || "";
     promptLoaded = true;
   } catch (e) {}
 }
@@ -911,6 +931,20 @@ document.getElementById("refine_box").addEventListener("input", () => {
     } catch (e) { flash("Couldn't save the system prompt — " + e.message); }
   }, 600);
 });
+// Save a listing field when the user leaves it. Delegated from document so it
+// keeps working across card rebuilds. blur does not bubble, hence capture.
+document.addEventListener("blur", async e => {
+  const t = e.target;
+  if (!t.dataset || !t.dataset.f || !t.dataset.id) return;
+  try {
+    await api(`/api/designs/${t.dataset.id}`, {
+      method: "PATCH",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({[t.dataset.f]: t.value}),
+    });
+    refresh();
+  } catch (err) { flash("Couldn't save the listing copy — " + err.message); }
+}, true);
 async function copyPrompt() {
   const el = document.getElementById("prompt_box");
   try { await navigator.clipboard.writeText(el.value); flash("Prompt copied"); }

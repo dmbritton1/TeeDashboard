@@ -230,6 +230,16 @@
         </div>
         <div class="hint" id="gen_info">loading…</div>
       </section>
+      <section class="panel">
+        <div class="panel-label">Listing copy</div>
+        <label>Shop context — your niche and who buys, used to write better tags. Never published.</label>
+        <textarea id="shop_context" spellcheck="false" placeholder="wall art for UK first-home buyers, housewarming and new-baby gifts"></textarea>
+        <label>Description boilerplate — added under every listing. Paper, sizes, framing, shipping, returns.</label>
+        <textarea id="listing_boilerplate" spellcheck="false" placeholder="Printed on 200gsm matte art paper…"></textarea>
+        <label>System prompt — how Gemma writes your titles, tags and hooks</label>
+        <textarea id="listing_prompt" spellcheck="false"></textarea>
+        <div class="row"><button onclick="saveSettings()">Save</button></div>
+      </section>
     </section>
   </main>
 </div>
