@@ -434,7 +434,8 @@ function progressBar(d) {
 // (0.008 per 120ms tick crosses 91% in about 23 minutes).
 const CREEP = {tee: {lead: 18, perTick: 0.4}, poster: {lead: 91, perTick: 0.008}};
 function creepTick() {
-  const active = designs.find(d => d.status === "generating");
+  const active = designs.find(d => d.status === "generating")
+              || testDesigns.find(d => d.status === "generating");
   if (!active) { creepId = null; creepVal = 0; return; }
   if (active.id !== creepId) { creepId = active.id; creepVal = active.progress || 0; }
   const c = CREEP[active.product] || CREEP.tee;
