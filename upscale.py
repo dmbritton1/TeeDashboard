@@ -4,22 +4,39 @@ import threading
 
 import db
 
-_model = None
+_models = {}          # device type -> loaded RealESRGAN
 _lock = threading.Lock()  # ponytail: one upscale at a time on an 8GB machine
 
 WEIGHTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "weights", "RealESRGAN_x4.pth")
 
 
-def _get_model():
-    global _model
-    if _model is None:
-        import torch
-        from py_real_esrgan.model import RealESRGAN
+def _device():
+    """Best available device. ROCm reports as cuda in torch, so the first branch
+    covers the RX 6700 - without it every upscale runs on CPU, which is tolerable
+    at 1024px and painful at a poster's 960x1344."""
+    import torch
 
-        device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-        _model = RealESRGAN(device, scale=4)
-        _model.load_weights(WEIGHTS, download=True)
-    return _model
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
+def _build_model(device):
+    from py_real_esrgan.model import RealESRGAN
+
+    model = RealESRGAN(device, scale=4)
+    model.load_weights(WEIGHTS, download=True)
+    return model
+
+
+def _get_model(device):
+    """Cached per device: the OOM path below reloads on CPU, and that must not
+    evict the GPU model for the next design."""
+    if device.type not in _models:
+        _models[device.type] = _build_model(device)
+    return _models[device.type]
 
 
 def upscale(design_id: int, src_path: str) -> None:
@@ -28,10 +45,16 @@ def upscale(design_id: int, src_path: str) -> None:
     def job():
         with _lock:
             try:
+                import torch
                 from PIL import Image
 
                 img = Image.open(src_path).convert("RGB")
-                result = _get_model().predict(img)
+                try:
+                    result = _get_model(_device()).predict(img)
+                except torch.OutOfMemoryError:
+                    # a poster is 1.7x a tee's pixels and 4x output is 3840x5376;
+                    # slow on CPU beats no print file at all
+                    result = _get_model(torch.device("cpu")).predict(img)
                 out_path = os.path.splitext(src_path)[0] + "_print.png"
                 result.save(out_path)
                 rel = os.path.join("designs", os.path.basename(out_path))
@@ -40,7 +63,7 @@ def upscale(design_id: int, src_path: str) -> None:
                         "UPDATE designs SET print_file = ?, error = NULL WHERE id = ?", (rel, design_id)
                     )
             except Exception as e:
-                # design stays approved; publish falls back to the 1024px original
+                # design stays approved; publish falls back to the original
                 with db.connect() as con:
                     con.execute(
                         "UPDATE designs SET error = ? WHERE id = ?",
