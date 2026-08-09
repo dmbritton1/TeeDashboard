@@ -139,6 +139,86 @@ def test_generate_returns_the_saved_image_bytes(monkeypatch):
     assert pipeline.generate_image_local("x", size=(720, 1008)) == b"not-really-a-png"
 
 
+# Chunked attention. gfx1031 has neither the flash nor the memory-efficient SDPA
+# kernel, so torch falls back to MATH and materialises the full NxN score matrix -
+# measured 26.6GB at the top poster rung against a 10GB card. Slicing the queries is
+# exact (each row's softmax is independent), but only if masks and causality are
+# handled properly, which is what these pin.
+def _sdpa_pair(monkeypatch, above=8, chunk=4):
+    """The wrapper plus the real SDPA, with the threshold dropped so tiny test
+    tensors take the chunking path."""
+    import torch.nn.functional as F
+    monkeypatch.setattr(pipeline, "ATTENTION_CHUNK_ABOVE", above)
+    monkeypatch.setattr(pipeline, "ATTENTION_CHUNK", chunk)
+    return pipeline._chunked_sdpa(F.scaled_dot_product_attention), F.scaled_dot_product_attention
+
+
+def test_chunked_attention_is_exact_not_an_approximation(monkeypatch):
+    wrapped, real = _sdpa_pair(monkeypatch)
+    torch.manual_seed(0)
+    q, k, v = (torch.randn(1, 2, 20, 8) for _ in range(3))
+    assert torch.allclose(wrapped(q, k, v), real(q, k, v), atol=1e-6)
+
+
+def test_chunked_attention_slices_a_per_query_mask_with_the_queries(monkeypatch):
+    # a mask with a real query dimension must be cut to match its block, or every
+    # block after the first silently attends through the wrong rows
+    wrapped, real = _sdpa_pair(monkeypatch)
+    torch.manual_seed(1)
+    q, k, v = (torch.randn(1, 2, 20, 8) for _ in range(3))
+    mask = torch.rand(1, 2, 20, 20) > 0.3
+    mask[..., 0] = True                      # no row may mask out everything
+    assert torch.allclose(wrapped(q, k, v, attn_mask=mask), real(q, k, v, attn_mask=mask), atol=1e-6)
+
+
+def test_chunked_attention_leaves_a_broadcast_mask_alone(monkeypatch):
+    # [B, 1, 1, S_k] broadcasts over queries, so slicing it would be wrong
+    wrapped, real = _sdpa_pair(monkeypatch)
+    torch.manual_seed(2)
+    q, k, v = (torch.randn(1, 2, 20, 8) for _ in range(3))
+    mask = torch.zeros(1, 1, 1, 20)
+    assert torch.allclose(wrapped(q, k, v, attn_mask=mask), real(q, k, v, attn_mask=mask), atol=1e-6)
+
+
+def test_chunked_attention_refuses_to_chunk_causal_attention(monkeypatch):
+    # is_causal is positional-dependent; a block would mask against its own offset
+    # rather than the sequence's, so this must fall through untouched
+    wrapped, real = _sdpa_pair(monkeypatch)
+    torch.manual_seed(3)
+    q, k, v = (torch.randn(1, 2, 20, 8) for _ in range(3))
+    assert torch.allclose(wrapped(q, k, v, is_causal=True), real(q, k, v, is_causal=True), atol=1e-6)
+
+
+def test_short_sequences_take_the_untouched_path(monkeypatch):
+    """t-shirts must keep running on exactly the code path they always have."""
+    calls = []
+
+    def spy(query, key, value, **kw):
+        calls.append(query.shape[-2])
+        return torch.zeros_like(query)
+
+    monkeypatch.setattr(pipeline, "ATTENTION_CHUNK_ABOVE", 4096)
+    monkeypatch.setattr(pipeline, "ATTENTION_CHUNK", 1024)
+    wrapped = pipeline._chunked_sdpa(spy)
+    wrapped(torch.zeros(1, 2, 4096, 8), torch.zeros(1, 2, 4096, 8), torch.zeros(1, 2, 4096, 8))
+    assert calls == [4096]      # 1024x1024's token count: one call, whole tensor
+
+
+def test_long_sequences_are_split_into_blocks(monkeypatch):
+    calls = []
+
+    def spy(query, key, value, **kw):
+        calls.append(query.shape[-2])
+        return torch.zeros_like(query)
+
+    monkeypatch.setattr(pipeline, "ATTENTION_CHUNK_ABOVE", 4096)
+    monkeypatch.setattr(pipeline, "ATTENTION_CHUNK", 1024)
+    wrapped = pipeline._chunked_sdpa(spy)
+    wrapped(torch.zeros(1, 2, 5040, 8), torch.zeros(1, 2, 5040, 8), torch.zeros(1, 2, 5040, 8))
+    assert calls == [1024, 1024, 1024, 1024, 944]       # 960x1344's token count
+    assert max(calls) <= 1024
+
+
 # _build_zimage can't run without a GPU and 15GB of weights, but the offload/tiling
 # calls it makes are pure API surface — and getting one wrong is silent until an
 # image is actually generated. It shipped calling pipe.enable_vae_tiling(), which
@@ -210,6 +290,9 @@ def _mock_zimage_build(monkeypatch, *, hip):
     monkeypatch.setattr(diffusers.ZImagePipeline, "from_pretrained",
                         classmethod(lambda cls, *a, **k: pipe))
     monkeypatch.setattr(torch.version, "hip", "7.13" if hip else None)
+    # stubbed, not just observed: the real one patches torch.nn.functional for the
+    # whole process, which has no business leaking out of a unit test
+    monkeypatch.setattr(pipeline, "_chunk_attention_globally", MagicMock())
     return pipeline._build_zimage(), pipe
 
 
@@ -228,3 +311,15 @@ def test_build_zimage_tiles_the_vae_on_rocm(monkeypatch):
 def test_build_zimage_skips_vae_tiling_off_rocm(monkeypatch):
     _, pipe = _mock_zimage_build(monkeypatch, hip=False)
     pipe.vae.enable_tiling.assert_not_called()
+
+
+def test_build_zimage_chunks_attention_on_rocm(monkeypatch):
+    # without this the top poster rung asks for 26.6GB of score matrix on a 10GB card
+    _mock_zimage_build(monkeypatch, hip=True)
+    pipeline._chunk_attention_globally.assert_called_once()
+
+
+def test_build_zimage_leaves_attention_alone_off_rocm(monkeypatch):
+    # CUDA has flash attention, so chunking would only cost kernel launches
+    _mock_zimage_build(monkeypatch, hip=False)
+    pipeline._chunk_attention_globally.assert_not_called()

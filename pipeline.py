@@ -114,6 +114,69 @@ def has_local() -> bool:
     return _has_local
 
 
+ATTENTION_CHUNK = 1024        # query rows per block
+ATTENTION_CHUNK_ABOVE = 4096  # 1024x1024's token count - the size that already works
+
+
+def _chunked_sdpa(sdpa):
+    """Wrap torch's attention so long sequences compute in query blocks.
+
+    gfx1031 has neither the flash nor the memory-efficient SDPA kernel ("No available
+    kernel"), so torch falls back to MATH, which materialises the whole NxN score
+    matrix: measured 26.6GB at 1440x2016 against a 10GB card. Each query row's
+    softmax depends only on its own row, so slicing the queries is exact rather than
+    an approximation - it trades a few more kernel launches for O(N x chunk) memory.
+    Measured 26.6GB -> 2.9GB at that size.
+
+    At or below ATTENTION_CHUNK_ABOVE it calls straight through, so square t-shirt
+    generation keeps running on precisely the path it always has.
+    """
+    import torch
+
+    def wrapper(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False,
+                scale=None, enable_gqa=False, **kwargs):
+        # is_causal masks by absolute position, which a block can't know about
+        if is_causal or query.shape[-2] <= ATTENTION_CHUNK_ABOVE:
+            return sdpa(query, key, value, attn_mask=attn_mask, dropout_p=dropout_p,
+                        is_causal=is_causal, scale=scale, enable_gqa=enable_gqa, **kwargs)
+        # a mask with a real query dimension has to be cut to match its block; one
+        # that broadcasts (size 1 there) applies to every block as-is
+        sliceable = attn_mask is not None and attn_mask.ndim >= 2 and attn_mask.shape[-2] != 1
+        out = torch.empty_like(query)
+        for i in range(0, query.shape[-2], ATTENTION_CHUNK):
+            block = slice(i, i + ATTENTION_CHUNK)
+            out[..., block, :] = sdpa(
+                query[..., block, :], key, value,
+                attn_mask=attn_mask[..., block, :] if sliceable else attn_mask,
+                dropout_p=dropout_p, is_causal=False, scale=scale,
+                enable_gqa=enable_gqa, **kwargs,
+            )
+        return out
+
+    return wrapper
+
+
+_sdpa_chunked = False
+
+
+def _chunk_attention_globally() -> None:
+    """Install the chunked wrapper over torch's SDPA, once per process.
+
+    Patching torch itself rather than the pipeline is deliberate: Z-Image routes
+    attention through diffusers' backend dispatcher, and its transformer has no
+    set_attention_slice, so pipe.enable_attention_slicing() is a silent no-op here.
+    """
+    global _sdpa_chunked
+    if _sdpa_chunked:
+        return
+    import torch
+
+    torch.nn.functional.scaled_dot_product_attention = _chunked_sdpa(
+        torch.nn.functional.scaled_dot_product_attention
+    )
+    _sdpa_chunked = True
+
+
 def _build_zimage():
     """Z-Image-Turbo with an 8-bit transformer and the abliterated text encoder."""
     import torch
@@ -141,6 +204,9 @@ def _build_zimage():
         # latent is 128x128 and tile_latent_min_size is also 128, so it makes one tile.
         # ZImagePipeline has no enable_vae_tiling() wrapper, so drive the VAE directly.
         pipe.vae.enable_tiling()
+        # The VAE was never the binding limit above 1024 - attention is. Same idea,
+        # different tensor: block the score matrix so it never has to fit whole.
+        _chunk_attention_globally()
     return pipe
 
 
