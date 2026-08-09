@@ -277,7 +277,6 @@ async function saveSettings() {
     access_code: code,
     shop_context: document.getElementById("shop_context").value,
     listing_boilerplate: document.getElementById("listing_boilerplate").value,
-    listing_prompt: document.getElementById("listing_prompt").value,
   };
   try {
     await api("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
@@ -395,8 +394,8 @@ function syncChildren(container, items) {
       // Never rebuild a card the user is typing in: replaceWith would drop the
       // element under the cursor and lose the edit. It re-syncs on the next
       // poll after focus moves away.
-      const busy = el.contains(document.activeElement);
-      if (el.__sig !== it.html && !busy) {
+      const focused = el.contains(document.activeElement);
+      if (el.__sig !== it.html && !focused) {
         const fresh = buildEl(it);
         adoptImage(el, fresh);
         el.replaceWith(fresh);
@@ -461,12 +460,24 @@ setInterval(creepTick, 120);
 // review grid stays a grid; the fields save on blur through the same PATCH
 // route that already handles tags and rating.
 function listingBox(d) {
-  if (d.status !== "approved" && d.status !== "published") return "";
+  // Published designs are out of scope for editing (spec's non-goal is
+  // rewriting copy for an already-published listing), so the box only ever
+  // shows for "approved" - once published it just disappears.
+  if (d.status !== "approved") return "";
   const waiting = !d.listing_title && !d.listing_hook && !d.listing_tags;
-  if (waiting && !d.error) return `<div class="prompt none">writing listing copy…</div>`;
+  if (waiting && !d.error) {
+    // Only designs whose listing.write job is still plausibly in flight get
+    // the "writing…" placeholder. A design approved before this feature
+    // existed (or long enough ago that the one Gemma call would have
+    // finished or errored by now) has no job coming - say nothing rather
+    // than promise a copy that will never arrive.
+    const inFlight = d.reviewed_at &&
+      (Date.now() - new Date(d.reviewed_at + "Z")) < 3 * 60 * 1000;
+    return inFlight ? `<div class="prompt none">writing listing copy…</div>` : "";
+  }
   return `<details class="prompt listing"><summary>listing copy</summary>` +
     `<label>Title</label><textarea data-f="listing_title" data-id="${d.id}" rows="2">${esc(d.listing_title || "")}</textarea>` +
-    `<label>Tags (13 max)</label><textarea data-f="listing_tags" data-id="${d.id}" rows="2">${esc(d.listing_tags || "")}</textarea>` +
+    `<label>Tags (max 13, 20 chars each - longer ones are dropped)</label><textarea data-f="listing_tags" data-id="${d.id}" rows="2">${esc(d.listing_tags || "")}</textarea>` +
     `<label>Hook</label><textarea data-f="listing_hook" data-id="${d.id}" rows="4">${esc(d.listing_hook || "")}</textarea>` +
     `</details>`;
 }
@@ -929,6 +940,23 @@ document.getElementById("refine_box").addEventListener("input", () => {
       await api("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"},
         body: JSON.stringify({[key]: refinePrompts[forProduct]})});
     } catch (e) { flash("Couldn't save the system prompt — " + e.message); }
+  }, 600);
+});
+// listing_prompt is excluded from saveSettings on purpose: that field is
+// pre-filled with the resolved default at load, so posting it on every
+// unrelated Save (e.g. the Printify token) would freeze today's default as
+// an explicit per-shop setting and future default improvements would never
+// reach this operator. Save it only when actually edited, same shape as
+// prompt_box above.
+let listingPromptSaveTimer;
+document.getElementById("listing_prompt").addEventListener("input", () => {
+  if (!promptLoaded) return;
+  clearTimeout(listingPromptSaveTimer);
+  listingPromptSaveTimer = setTimeout(async () => {
+    try {
+      await api("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({listing_prompt: document.getElementById("listing_prompt").value})});
+    } catch (e) { flash("Couldn't save the listing prompt — " + e.message); }
   }, 600);
 });
 // Save a listing field when the user leaves it. Delegated from document so it

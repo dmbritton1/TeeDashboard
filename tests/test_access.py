@@ -130,6 +130,9 @@ def test_all_mutating_design_actions_gated_when_code_set():
     # DELETE method is also gated
     r = client.delete(f"/api/designs/{did}")
     assert r.status_code == 401, f"DELETE not gated (got {r.status_code})"
+    # PATCH routes the Etsy title/tags/hook, so it must be gated too
+    r = client.patch(f"/api/designs/{did}", json={"rating": 3})
+    assert r.status_code == 401, f"PATCH not gated (got {r.status_code})"
 
 
 def test_regenerate_respects_queue_cap():
