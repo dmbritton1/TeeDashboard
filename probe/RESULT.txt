@@ -1,0 +1,60 @@
+Poster size probe - RX 6700 (gfx1031), ROCm 7.13, 9.98 GiB VRAM
+Recorded 2026-08-08
+
+NOT a probe_poster.py main() walk. Both rungs below were run one at a time with
+`probe_poster.py <WxH>` while watching the GPU, so the 1024x1024 square control
+and the 720x1008 floor control in main() were never executed. The square size is
+what the dashboard already generates in production every day, which is weaker
+evidence than a control run but not nothing.
+
+  1440x2016   292 dpi   FAIL   VAE decode did not finish in 23 min; killed
+  960x1344    195 dpi   PASS   19.5 min  (5s denoise + ~19 min VAE decode)
+
+1440x2016 first died differently - torch.OutOfMemoryError asking for 14.42 GiB
+against a 9.98 GiB card, 13 seconds into step 0 of 9, inside transformer
+attention. gfx1031 has neither the flash nor the memory-efficient SDPA kernel
+("No available kernel"), so torch falls back to MATH, which materialises the
+whole NxN score matrix. pipeline._chunk_attention_globally() fixed that:
+measured 26.62 GiB -> 2.91 GiB at 11,340 tokens, and denoising then completed in
+8 seconds. What remains is the decode, which is a different problem.
+
+The decode is the binding limit at every size:
+
+  MIOpen(HIP): Warning [OpenRuntimeLibraryForDevice] CK grouped conv library
+  not found for device gfx1031: The specified module could not be found.
+
+VAE decode falls back to a reference convolution. Combined with tiling
+(tile_latent_min_size = 128), each latent tile costs roughly a full 1024^2
+decode of about 5.4 min:
+
+  1024x1024  latent 128x128  1 tile    ~5.4 min   (the t-shirt size)
+   720x1008  latent  90x126  1 tile    ~3.7 min
+   800x1120  latent 100x140  2 tiles   ~11 min
+   960x1344  latent 120x168  3-4 tiles ~16-22 min
+
+720x1008 is the only 5:7 rung that avoids tiling entirely (both latent axes
+<= 128). Untested one-line lead: raising tile_latent_min_size could cut decode
+roughly 3x and would make 1440x2016 worth retrying.
+
+960x1344 output, checked rather than assumed:
+
+- No VAE tile seams. Row/column discontinuity spikes at rows 80/81/99/116/619/
+  634/635/1202/1203/1220/1238/1239 and cols 81/125/468/484/827/872 are all
+  symmetric about centre - they are the drawn border frame. Nothing near the
+  tile boundary region at y ~ 768-1024. Tiling stitches invisibly.
+- Crisp, 1.81 MB PNG.
+- Composition is a 2x2 mirrored ornament, not a poster with a subject. Mirror
+  symmetry measured left-right 20.52 and top-bottom 38.09 against a
+  random-shuffle baseline of 55.77 (lower = more duplicated).
+
+That last point is CONFOUNDED and proves nothing about aspect ratio. The probe
+PROMPT itself asks for "geometric symmetrical ornamental structure", so the model
+made a symmetrical ornament because it was told to, and there was no subject to
+duplicate because none was requested. A corroborating tell that the prompt is
+steering weakly in general: it says "no frame, no border" and the image has a
+prominent frame - expected, since Z-Image-Turbo runs at guidance_scale=0.0 and
+without classifier-free guidance negative phrasing barely binds.
+
+Settling it needs one ~20 min run at 960x1344 with a single-subject prompt and no
+symmetry language. One subject means the aspect ratio is fine; two means real
+duplication and poster prompts need composition guardrails.

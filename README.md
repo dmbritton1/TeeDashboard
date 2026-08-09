@@ -70,6 +70,33 @@ Start the server so other computers can reach it:
 
     .venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
 
+### Poster sizes (50x70cm)
+
+Measured on an RX 6700 (gfx1031, 9.98GB), not estimated. Full detail in
+`probe/RESULT.txt`; re-run it yourself with `.venv\Scripts\python probe_poster.py`.
+
+| Size | dpi on a 50x70 after 4x upscale | Result |
+| --- | --- | --- |
+| 1440x2016 | 292 | VAE decode never finished in 23 min |
+| 960x1344 | 195 | 19.5 min, no tile seams - **use this one** |
+
+Two gfx103x quirks make big images hard on this card, and both are handled in
+`pipeline.py` rather than by shrinking the image:
+
+- **Attention.** There is no flash or memory-efficient SDPA kernel, so torch
+  falls back to MATH and materialises the whole NxN score matrix - 26.6GB at
+  1440x2016. `_chunk_attention_globally()` slices attention over query blocks,
+  which is exact rather than approximate because each query row's softmax
+  depends only on its own row. Measured 26.6GB -> 2.9GB. Sizes at or below
+  1024x1024 skip the wrapper entirely and run the path they always have.
+- **VAE decode.** MIOpen has no CK grouped-conv library for gfx1031, so decode
+  falls back to a slow reference convolution: roughly 5.4 min per 128x128 latent
+  tile. This, not memory, is what caps the usable size. A poster is ~19 min of
+  decode against ~5 seconds of denoising.
+
+195 dpi is above the 150 dpi floor normally used for large-format wall art, but
+below the 300 dpi a print service may ask for.
+
 ## Rate limiting (built in)
 
 Generation is paced at ~2 images/min and stops at 450 images/day to stay
