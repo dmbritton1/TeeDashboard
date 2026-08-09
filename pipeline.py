@@ -281,6 +281,27 @@ def poster_dpi(width: int, height: int, upscale: int = 4) -> int:
     return int(min(width * upscale / w_in, height * upscale / h_in))
 
 
+DEFAULT_POSTER_SIZE = (960, 1344)  # the only rung measured working end to end
+
+
+def poster_size() -> tuple[int, int]:
+    """Which ladder rung posters generate at, from the `poster_size` setting.
+
+    Anything not literally on POSTER_LADDER falls back to the measured default:
+    every rung is exact 5:7 and 16-aligned, and a hand-edited setting must not be
+    able to ask the GPU for a shape we never tested. 19 minutes is a long time to
+    wait to find out a size doesn't decode.
+    """
+    import db
+
+    raw = db.get_setting("poster_size") or ""
+    try:
+        width, height = (int(n) for n in raw.lower().split("x"))
+    except ValueError:
+        return DEFAULT_POSTER_SIZE
+    return (width, height) if (width, height) in POSTER_LADDER else DEFAULT_POSTER_SIZE
+
+
 def step_progress(step_index: int, steps: int) -> int:
     """Percent to show after finishing step `step_index` (0-based) of `steps`.
     Reserves the top of the bar for the VAE decode that follows the loop."""

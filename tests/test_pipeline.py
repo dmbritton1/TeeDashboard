@@ -1,5 +1,6 @@
 import pytest
 
+import db
 import pipeline
 from pipeline import parse_input, build_prompt, step_progress
 
@@ -341,3 +342,37 @@ def test_poster_template_asks_for_one_subject_filling_a_tall_canvas():
     t = pipeline.POSTER_TEMPLATE.lower()
     assert "one clear focal subject" in t
     assert "edge to edge" in t
+
+
+def test_poster_size_defaults_to_the_measured_rung(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "test.db"))
+    db.init()
+    assert pipeline.poster_size() == (960, 1344)
+
+
+def test_poster_size_reads_a_saved_rung(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "test.db"))
+    db.init()
+    db.set_setting("poster_size", "1120x1568")
+    assert pipeline.poster_size() == (1120, 1568)
+
+
+def test_poster_size_rejects_a_size_that_is_not_on_the_ladder(tmp_path, monkeypatch):
+    # a hand-edited setting must not be able to ask the GPU for a size we never
+    # tested - every rung is 16-aligned and exact 5:7, and an arbitrary one is not
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "test.db"))
+    db.init()
+    db.set_setting("poster_size", "2000x3000")
+    assert pipeline.poster_size() == pipeline.DEFAULT_POSTER_SIZE
+
+
+def test_poster_size_survives_junk(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "test.db"))
+    db.init()
+    for junk in ("", "big", "960", "960x", "axb", "960x1344x99"):
+        db.set_setting("poster_size", junk)
+        assert pipeline.poster_size() == pipeline.DEFAULT_POSTER_SIZE
+
+
+def test_default_poster_size_is_actually_on_the_ladder():
+    assert pipeline.DEFAULT_POSTER_SIZE in pipeline.POSTER_LADDER
