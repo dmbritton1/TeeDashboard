@@ -33,3 +33,7 @@ def test_models_are_cached_per_device(monkeypatch):
     a = upscale._get_model(torch.device("cpu"))
     b = upscale._get_model(torch.device("cpu"))
     assert a is b and made == ["cpu"]
+    c = upscale._get_model(torch.device("cuda"))
+    assert c is not a and made == ["cpu", "cuda"]
+    # and the second device's build must not have evicted the first
+    assert upscale._get_model(torch.device("cpu")) is a
