@@ -104,36 +104,13 @@ const STAGES = [
 let tab = "pending", designs = [], testDesigns = [];
 let stat = {}, busy = 0;
 
-// One prompt per burst: bulk approve fires many calls at once, and without this
-// every one of them would pop its own dialog.
-let codeAsk = null;
-function askForCode() {
-  if (!codeAsk) {
-    const entered = prompt("Enter the access code:");
-    if (entered) localStorage.setItem("accessCode", entered);
-    codeAsk = Promise.resolve(entered);
-    setTimeout(() => { codeAsk = null; }, 0);  // release once the burst drains
-  }
-  return codeAsk;
-}
-
-// Reads are never gated; only mutating calls can come back 401, so the prompt
-// can't fire from the 3s refresh loop.
+// The auth cookie rides along automatically; a 401 means it expired or was
+// cleared, and the only cure is the login page.
 async function apiFetch(path, opts) {
-  opts = Object.assign({}, opts);
-  const withCode = code => Object.assign({}, opts.headers, {"X-Access-Code": code});
-  const sent = localStorage.getItem("accessCode");
-  if (sent) opts.headers = withCode(sent);
-  let r = await fetch(path, opts);
+  const r = await fetch(path, opts);
   if (r.status === 401) {
-    // prompt() blocks, so a sibling call that 401s slightly later already finds
-    // the fresh code in storage and retries without asking again
-    let code = localStorage.getItem("accessCode");
-    if (code === sent) code = await askForCode();
-    if (code && code !== sent) {
-      opts.headers = withCode(code);
-      r = await fetch(path, opts);
-    }
+    location.href = "/login";
+    throw new Error("Signed out");
   }
   if (!r.ok) {
     let detail = r.statusText;
@@ -147,23 +124,6 @@ async function api(path, opts) {
   return (await apiFetch(path, opts)).json();
 }
 
-// Export and backup are gated too, so they can't be plain <a href> links — those
-// can't send X-Access-Code. Fetch with the header, then save the blob.
-async function downloadFile(path, fallbackName) {
-  try {
-    const r = await apiFetch(path);
-    const cd = r.headers.get("content-disposition") || "";
-    const m = cd.match(/filename="?([^"]+)"?/);
-    const url = URL.createObjectURL(await r.blob());
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = m ? m[1] : fallbackName;
-    a.click();
-    URL.revokeObjectURL(url);
-  } catch (e) {
-    alert("Download failed: " + e.message);
-  }
-}
 // minimal CSV: two columns, handles quoted cells with commas/newlines
 function parseCSV(text) {
   const rows = [];
@@ -268,18 +228,14 @@ document.getElementById("csv_file").addEventListener("change", async (ev) => {
   ev.target.value = "";
 });
 async function saveSettings() {
-  const code = document.getElementById("access_code").value;
   const body = {
     gemini_api_key: document.getElementById("gemini_key").value,
     printify_api_token: document.getElementById("printify_token").value,
     printify_shop_id: document.getElementById("printify_shop").value,
     printify_poster_blueprint_id: document.getElementById("printify_poster_blueprint").value,
-    access_code: code,
   };
   try {
     await api("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
-    // remember the code we just set, so this browser isn't locked out by it
-    if (code.trim()) localStorage.setItem("accessCode", code.trim());
     if (body.gemini_api_key.trim())
       document.getElementById("key_state").textContent = "key saved ✓";
     flash("Settings saved");
@@ -287,12 +243,7 @@ async function saveSettings() {
   catch (e) { alert(e.message); }
   document.getElementById("gemini_key").value = "";
   document.getElementById("printify_token").value = "";
-  document.getElementById("access_code").value = "";
   refresh();
-}
-function forgetCode() {
-  localStorage.removeItem("accessCode");
-  flash("Access code cleared on this device");
 }
 function showSpeedState(size) {
   document.getElementById("speed_state").textContent = size === 512
@@ -810,8 +761,6 @@ async function refresh() {
     const orb = document.getElementById("orb");
     orb.classList.toggle("live", status.queued > 0);
     document.getElementById("orb_count").textContent = status.queued > 0 ? status.queued : "";
-    document.getElementById("code_state").textContent =
-      status.access_code ? "code set ✓ — link is gated" : "no code — anyone with the link can queue";
     render();
     const pending = designs.filter(d => d.status === "pending").length;
     document.title = (pending ? `(${pending}) ` : "") + "Compound";
