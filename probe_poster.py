@@ -27,6 +27,9 @@ LADDER_TIMEOUT = 1800   # 30 min/rung - ~5x the measured 1024 time, so slow != h
 WARMUP_TIMEOUT = 7200   # 2h - the very first run may download ~15GB of weights
 SELLABLE_DPI = 150      # normal floor for large wall art; under this is diagnostic only
 OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "probe")
+# This prompt is the CONFOUNDED one - it asks for a symmetrical ornament, so its
+# output says nothing about aspect-ratio duplication. probe/RESULT.txt's SETTLED
+# paragraph records the single-subject run that answered that question.
 PROMPT = (
     "Art deco travel poster, geometric symmetrical ornamental structure, bold "
     "limited palette, full-bleed artwork, no frame, no border, no mockup, no text"

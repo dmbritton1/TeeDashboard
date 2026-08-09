@@ -212,7 +212,11 @@ async function loadProducts() {
     document.getElementById("product_select").innerHTML = opts;
     document.getElementById("test_product_select").innerHTML = opts;
     productChanged();
-  } catch (e) {}
+  } catch (e) {
+    // the dropdowns are empty and submits will fall back to tee - say so
+    document.getElementById("product_state").textContent =
+      "couldn't load products — queueing defaults to T-shirt";
+  }
 }
 loadProducts();
 
