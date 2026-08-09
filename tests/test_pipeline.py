@@ -376,3 +376,58 @@ def test_poster_size_survives_junk(tmp_path, monkeypatch):
 
 def test_default_poster_size_is_actually_on_the_ladder():
     assert pipeline.DEFAULT_POSTER_SIZE in pipeline.POSTER_LADDER
+
+
+PRODUCT_KEYS = {"label", "template", "refine_key", "size", "aspect", "decode_share",
+                "eta_minutes", "blueprint_key", "blueprint_default", "price_cents",
+                "title_suffix"}
+
+
+def test_every_product_carries_every_key():
+    # a missing key is a KeyError 19 minutes into a generation run, so check the
+    # shape of the registry rather than trusting each call site to be careful
+    for name, data in pipeline.PRODUCTS.items():
+        assert set(data) == PRODUCT_KEYS, name
+
+
+def test_default_product_is_in_the_registry():
+    assert pipeline.DEFAULT_PRODUCT in pipeline.PRODUCTS
+
+
+def test_product_data_falls_back_like_current_model_does():
+    assert pipeline.product_data("poster")["label"] == "Poster (50x70cm)"
+    assert pipeline.product_data("hoodie") is pipeline.PRODUCTS["tee"]
+    assert pipeline.product_data(None) is pipeline.PRODUCTS["tee"]
+    assert pipeline.product_data("") is pipeline.PRODUCTS["tee"]
+
+
+def test_tee_size_is_square_and_still_obeys_speed_production(monkeypatch):
+    monkeypatch.setattr(pipeline, "current_size", lambda: 512)
+    assert pipeline.product_size("tee") == (512, 512)
+    monkeypatch.setattr(pipeline, "current_size", lambda: 1024)
+    assert pipeline.product_size("tee") == (1024, 1024)
+
+
+def test_poster_size_ignores_speed_production(monkeypatch):
+    # a 512-tall poster is unprintable; Speed Production is a t-shirt sifting tool
+    monkeypatch.setattr(pipeline, "current_size", lambda: 512)
+    monkeypatch.setattr(pipeline, "poster_size", lambda: (960, 1344))
+    assert pipeline.product_size("poster") == (960, 1344)
+
+
+def test_unknown_product_generates_as_a_tee(monkeypatch):
+    monkeypatch.setattr(pipeline, "current_size", lambda: 1024)
+    assert pipeline.product_size("hoodie") == (1024, 1024)
+
+
+def test_tee_decode_share_matches_the_old_reserved_fraction():
+    assert pipeline.PRODUCTS["tee"]["decode_share"] == 1 / (pipeline.ZIMAGE_STEPS + 1)
+
+
+def test_poster_aspect_is_the_5_7_the_ladder_generates():
+    assert pipeline.PRODUCTS["poster"]["aspect"] == "5 / 7"
+    assert pipeline.PRODUCTS["tee"]["aspect"] == "1"
+
+
+def test_tee_blueprint_default_is_the_gildan_tee_it_always_was():
+    assert pipeline.PRODUCTS["tee"]["blueprint_default"] == "6"

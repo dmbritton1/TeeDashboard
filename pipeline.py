@@ -302,6 +302,60 @@ def poster_size() -> tuple[int, int]:
     return (width, height) if (width, height) in POSTER_LADDER else DEFAULT_POSTER_SIZE
 
 
+# What a product IS, in one place. Same idea as the MODELS registry above: each
+# seam looks its product up rather than branching on a string, so a third product
+# is one dict entry instead of a hunt through six files.
+#
+# `size` is a callable so both products resolve the same way at call time - which
+# is also what keeps Speed Production wired to tees only. Both entries call
+# through a lambda rather than naming the function directly: a direct reference
+# would bind the function object at import time, so monkeypatching
+# pipeline.poster_size in a test would silently not take.
+PRODUCTS = {
+    "tee": {
+        "label": "T-shirt",
+        "template": PROMPT_TEMPLATE,
+        "refine_key": "refine_prompt",
+        "size": lambda: (current_size(), current_size()),
+        "aspect": "1",
+        "decode_share": 1 / (ZIMAGE_STEPS + 1),
+        "eta_minutes": 6,
+        "blueprint_key": "printify_blueprint_id",
+        "blueprint_default": "6",   # Unisex Heavy Cotton Tee (Gildan 5000)
+        "price_cents": 2499,
+        "title_suffix": "T-Shirt",
+    },
+    "poster": {
+        "label": "Poster (50x70cm)",
+        "template": POSTER_TEMPLATE,
+        "refine_key": "refine_prompt_poster",
+        "size": lambda: poster_size(),
+        "aspect": "5 / 7",
+        # measured: 960x1344 spends ~19 of 19.5 min in the VAE decode, because
+        # MIOpen has no CK grouped-conv library for gfx1031
+        "decode_share": 0.95,
+        "eta_minutes": 20,
+        "blueprint_key": "printify_poster_blueprint_id",
+        "blueprint_default": "",    # unknown: the catalogue endpoint 401s on this token
+        "price_cents": 3499,        # placeholder until the blueprint is chosen
+        "title_suffix": "Poster",
+    },
+}
+DEFAULT_PRODUCT = "tee"
+
+
+def product_data(name: str | None) -> dict:
+    """Registry entry for a product. An unrecognised name falls back to the
+    default rather than raising - same habit as current_model(), and for the same
+    reason: a bad database value should degrade, not kill the worker thread."""
+    return PRODUCTS.get(name or "", PRODUCTS[DEFAULT_PRODUCT])
+
+
+def product_size(name: str | None) -> tuple[int, int]:
+    """The (width, height) this product generates at, resolved now."""
+    return product_data(name)["size"]()
+
+
 def step_progress(step_index: int, steps: int) -> int:
     """Percent to show after finishing step `step_index` (0-based) of `steps`.
     Reserves the top of the bar for the VAE decode that follows the loop."""
