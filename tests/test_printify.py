@@ -42,7 +42,7 @@ def test_unrecognised_catalogue_falls_back_rather_than_publishing_nothing():
     # better narrow than not at all - the same habit the tee path already had
     odd = [{"id": 30, "options": {"size": "A2"}}, {"id": 31, "options": {"size": "A1"}}]
     assert [v["id"] for v in printify._select_variants("poster", odd)] == [30, 31]
-    assert printify._select_variants("tee", [{"id": 40, "options": {"color": "Lime"}}])
+    assert printify._select_variants("tee", [{"id": 40, "options": {"color": "Lime"}}]) == [{"id": 40, "options": {"color": "Lime"}}]
 
 
 def test_tee_blueprint_defaults_to_the_gildan_when_unset(tmp_path, monkeypatch):

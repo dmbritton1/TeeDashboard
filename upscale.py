@@ -4,7 +4,7 @@ import threading
 
 import db
 
-_models = {}          # device type -> loaded RealESRGAN
+_models = {}          # device type -> loaded model; only touched inside job()'s _lock, which is what makes this dict safe
 _lock = threading.Lock()  # ponytail: one upscale at a time on an 8GB machine
 
 WEIGHTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "weights", "RealESRGAN_x4.pth")
