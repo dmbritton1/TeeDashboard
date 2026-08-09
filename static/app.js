@@ -883,16 +883,17 @@ document.getElementById("prompt_box").addEventListener("input", () => {
     } catch (e) { flash("Couldn't save the prompt — " + e.message); }
   }, 600);
 });
-let refineSaveTimer;
+const refineSaveTimers = {};
 document.getElementById("refine_box").addEventListener("input", () => {
   if (!promptLoaded) return;
   // Snapshot at keystroke time: cache the edit under the product it was written
   // for immediately, so a dropdown switch inside the debounce window can neither
-  // lose it nor save it onto the other product.
+  // lose it nor save it onto the other product. One timer per product - a fresh
+  // edit on one product must not cancel the other's pending save.
   const forProduct = refineProduct;
   refinePrompts[forProduct] = document.getElementById("refine_box").value;
-  clearTimeout(refineSaveTimer);
-  refineSaveTimer = setTimeout(async () => {
+  clearTimeout(refineSaveTimers[forProduct]);
+  refineSaveTimers[forProduct] = setTimeout(async () => {
     const key = forProduct === "poster" ? "refine_prompt_poster" : "refine_prompt";
     try {
       await api("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"},
