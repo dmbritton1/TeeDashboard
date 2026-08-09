@@ -1720,7 +1720,7 @@ Expected: three numbers. A top-bottom score far below the random baseline means 
 
 - [ ] **Step 3: Decide**
 
-**One lighthouse, symmetry scores near the random baseline** — the aspect ratio is fine and the ornament was the old prompt doing what it was told. Record that in `probe/RESULT.txt` under the composition section, replacing the "settling it needs one run" paragraph with the result. Skip Steps 4-5.
+**One lighthouse, symmetry scores near the random baseline** — the aspect ratio is fine and the ornament was the old prompt doing what it was told. Record that in `probe/RESULT.txt` under the composition section, replacing the "settling it needs one run" paragraph with the result and the three measured numbers. Skip Step 4, then commit at Step 5 (`probe/RESULT.txt` only — `pipeline.py` and the tests are untouched on this branch).
 
 **Two lighthouses, or a mirrored horizon** — real duplication. Continue to Step 4.
 
