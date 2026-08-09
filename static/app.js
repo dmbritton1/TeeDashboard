@@ -389,7 +389,11 @@ function syncChildren(container, items) {
     let el = old.get(it.key);
     if (el) {
       old.delete(it.key);
-      if (el.__sig !== it.html) {
+      // Never rebuild a card the user is typing in: replaceWith would drop the
+      // element under the cursor and lose the edit. It re-syncs on the next
+      // poll after focus moves away.
+      const busy = el.contains(document.activeElement);
+      if (el.__sig !== it.html && !busy) {
         const fresh = buildEl(it);
         adoptImage(el, fresh);
         el.replaceWith(fresh);
