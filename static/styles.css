@@ -324,3 +324,22 @@ select, input[type=date] {
   position: absolute; top: 17px; right: 0; white-space: nowrap;
   font-family: var(--mono); font-size: 10px; color: var(--gold-soft);
 }
+
+/* ── login ─────────────────────────────────── */
+body.login { display: flex; align-items: center; justify-content: center; }
+.login-card {
+  width: 320px; max-width: calc(100% - 32px);
+  padding: 34px 30px 26px; text-align: center;
+  background: rgba(19, 16, 13, 0.82);
+  border: 1px solid var(--mist);
+}
+.login-card .brand { border-bottom: none; padding-bottom: 8px; }
+.login-card input[type=password] {
+  width: 100%; margin: 22px 0 14px;
+  text-align: center; letter-spacing: 0.2em;
+}
+.login-card button { width: 100%; }
+.login-error {
+  min-height: 17px; margin: 14px 0 0;
+  font-size: 12px; color: var(--clay);
+}

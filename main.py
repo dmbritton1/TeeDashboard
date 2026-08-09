@@ -1,15 +1,20 @@
 """FastAPI server for the t-shirt design pipeline dashboard."""
 import csv
 import datetime
+import hashlib
+import hmac
 import io
 import os
 import tempfile
+import time
+import urllib.parse
 import zipfile
 
 import requests
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Header, HTTPException
-from fastapi.responses import FileResponse, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
+                               RedirectResponse, Response)
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
@@ -23,6 +28,18 @@ import worker
 
 load_dotenv()
 BASE = os.path.dirname(os.path.abspath(__file__))
+PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "").strip()
+if not PASSWORD:
+    raise SystemExit(
+        "DASHBOARD_PASSWORD is not set, so there would be no lock on the door.\n"
+        "Add this line to your .env file:\n\n"
+        "    DASHBOARD_PASSWORD=pick-something-only-you-two-know\n\n"
+        "then start the dashboard again."
+    )
+# The cookie is the hash of the password itself: no session store to keep, and
+# changing the password in .env signs everyone out for free.
+COOKIE = hashlib.sha256(PASSWORD.encode()).hexdigest()
+OPEN_PATHS = {"/login", "/logout", "/static/styles.css"}
 DEFAULT_PROMPT = (
     "Give me 20 t-shirt design ideas for [niche]. "
     "Format each as one line: phrase | style keywords. "
@@ -43,6 +60,56 @@ app.mount("/static", StaticFiles(directory=os.path.join(BASE, "static")), name="
 @app.get("/")
 def index():
     return FileResponse(os.path.join(BASE, "static", "index.html"))
+
+
+@app.middleware("http")
+async def require_login(request: Request, call_next):
+    """Gate everything but the login page - including the StaticFiles mounts."""
+    if request.url.path not in OPEN_PATHS and not hmac.compare_digest(
+        request.cookies.get("auth", ""), COOKIE
+    ):
+        # the dashboard JS expects JSON from /api/*, not a page of HTML
+        if request.url.path.startswith("/api/"):
+            return JSONResponse({"detail": "Not signed in"}, status_code=401)
+        return RedirectResponse("/login", status_code=303)
+    return await call_next(request)
+
+
+def _login_page(error: str = ""):
+    with open(os.path.join(BASE, "static", "login.html"), encoding="utf-8") as f:
+        return HTMLResponse(f.read().replace("<!--error-->", error))
+
+
+@app.get("/login")
+def login_page():
+    return _login_page()
+
+
+@app.post("/login")
+async def login(request: Request):
+    # ponytail: parse_qs instead of fastapi.Form, which would pull in
+    # python-multipart for one field on one endpoint
+    form = urllib.parse.parse_qs((await request.body()).decode())
+    entered = (form.get("password") or [""])[0]
+    if not hmac.compare_digest(
+        hashlib.sha256(entered.encode()).hexdigest(), COOKIE
+    ):
+        time.sleep(1)  # enough to make guessing over a tunnel pointless
+        return _login_page("Incorrect password")
+    r = RedirectResponse("/", status_code=303)
+    # cloudflared terminates TLS and forwards plain http, so trust its header;
+    # falling back to the scheme keeps the cookie usable on http://localhost
+    proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+    r.set_cookie("auth", COOKIE, max_age=2592000, httponly=True,
+                 samesite="lax", secure=proto == "https")
+    return r
+
+
+@app.post("/logout")
+def logout():
+    r = RedirectResponse("/login", status_code=303)
+    r.delete_cookie("auth")
+    return r
 
 
 def require_access_code(x_access_code: str | None = Header(default=None)) -> None:

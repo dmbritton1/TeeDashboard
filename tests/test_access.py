@@ -17,12 +17,64 @@ from fastapi.testclient import TestClient  # noqa: E402
 import main  # noqa: E402
 
 client = TestClient(main.app)
+client.cookies.set("auth", main.COOKIE)
 
 
 def _reset():
     with db.connect() as con:
         con.execute("DELETE FROM designs")
         con.execute("DELETE FROM settings")
+
+
+def _anon():
+    """A client with no cookie. Fresh each time: TestClient keeps cookies."""
+    return TestClient(main.app)
+
+
+def test_api_refused_without_cookie():
+    assert _anon().get("/api/designs").status_code == 401
+
+
+def test_dashboard_redirects_to_login_without_cookie():
+    r = _anon().get("/", follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/login"
+
+
+def test_design_images_refused_without_cookie():
+    # the /designs mount was the real hole: a leaked link showed every image
+    r = _anon().get("/designs/anything.png", follow_redirects=False)
+    assert r.status_code == 303
+
+
+def test_login_page_and_its_stylesheet_are_reachable():
+    a = _anon()
+    assert a.get("/login").status_code == 200
+    assert a.get("/static/styles.css").status_code == 200
+
+
+def test_correct_password_sets_cookie_and_opens_the_door():
+    a = _anon()
+    r = a.post("/login", data={"password": "test-password"}, follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/"
+    assert a.cookies.get("auth")
+    assert a.get("/api/designs").status_code == 200
+
+
+def test_wrong_password_sets_no_cookie():
+    a = _anon()
+    r = a.post("/login", data={"password": "nope"}, follow_redirects=False)
+    assert r.status_code == 200
+    assert "Incorrect" in r.text
+    assert not a.cookies.get("auth")
+
+
+def test_logout_clears_the_cookie():
+    a = _anon()
+    a.post("/login", data={"password": "test-password"})
+    a.post("/logout", follow_redirects=False)
+    assert a.get("/api/designs").status_code == 401
 
 
 def test_generation_open_when_no_code_set():
