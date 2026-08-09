@@ -24,15 +24,22 @@ def _device():
 
 
 def _job_device():
-    """CPU while a design is generating: the 10GB card can't hold Real-ESRGAN's
-    patches next to a poster's denoise or decode, and generation has no OOM
-    fallback - a fault there loses a 19-minute run. A slow upscale beats that."""
+    """CPU if a design was generating when this upscale started: the 10GB card
+    can't hold Real-ESRGAN's patches next to a poster's denoise or decode, and
+    generation has no OOM fallback - a fault there loses a 19-minute run. A
+    point-in-time check, not a reservation, but it closes the dominant window
+    (approving designs during a long generation), and the inverse race is
+    bounded by the OOM fallback below. On any doubt, fail toward the safe
+    device rather than failing the upscale."""
     import torch
 
-    with db.connect() as con:
-        busy = con.execute(
-            "SELECT 1 FROM designs WHERE status = 'generating' LIMIT 1"
-        ).fetchone()
+    try:
+        with db.connect() as con:
+            busy = con.execute(
+                "SELECT 1 FROM designs WHERE status = 'generating' LIMIT 1"
+            ).fetchone()
+    except Exception:
+        return torch.device("cpu")
     return torch.device("cpu") if busy else _device()
 
 

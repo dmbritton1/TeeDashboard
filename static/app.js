@@ -851,6 +851,7 @@ function productChanged() {
   const name = document.getElementById("product_select").value || "tee";
   refineProduct = name;
   document.getElementById("refine_box").value = refinePrompts[name] || "";
+  if (!Object.keys(products).length) return;  // loadProducts failed; leave its message up
   const p = products[name] || {};
   document.getElementById("product_state").textContent =
     p.eta_minutes ? `about ${p.eta_minutes} min per image on this GPU` : "";
