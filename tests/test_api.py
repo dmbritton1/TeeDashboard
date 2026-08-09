@@ -6,6 +6,7 @@ import pytest
 from fastapi import HTTPException
 
 import db
+import listing
 import pipeline
 import worker
 
@@ -28,6 +29,17 @@ def insert(status="pending", **kw):
             tuple(row.values()),
         )
         return cur.lastrowid
+
+
+@pytest.fixture(autouse=True)
+def _stub_listing_write(monkeypatch):
+    """Default every test to a no-op listing.write so a test calling
+    main.approve() without its own stub can't spawn a real daemon thread -
+    one that leaks past teardown would write into the developer's real
+    designs.db (db.connect() reads db.DB_PATH at call time, after the
+    monkeypatch this fixture applies has already been undone). The two tests
+    that specifically exercise write() override this in their own body."""
+    monkeypatch.setattr(listing, "write", lambda design_id: None)
 
 
 def test_approve_sets_reviewed_at(tmp_path, monkeypatch):
@@ -121,6 +133,23 @@ def test_publish_stores_product_id(tmp_path, monkeypatch):
     with db.connect() as con:
         row = con.execute("SELECT * FROM designs WHERE id = ?", (did,)).fetchone()
     assert row["status"] == "published" and row["product_id"] == "prod-123"
+
+
+def test_publish_guard_survives_a_listing_failure(tmp_path, monkeypatch):
+    """error doubles as the signal upscale uses to release the publish gate
+    (main.py's `if not row["print_file"] and ...` check). A listing-copy
+    failure also writes to `error`, but must never be mistaken for an
+    upscale failure - the governing rule is that a copywriting failure must
+    never change what publish does. With print_file still NULL, this must
+    still 409 instead of publishing the low-resolution fallback art."""
+    main = load_main(tmp_path, monkeypatch)
+    db.set_setting("printify_api_token", "t")
+    db.set_setting("printify_shop_id", "s")
+    did = insert("approved", error="listing copy failed: quota exhausted")
+    with pytest.raises(HTTPException) as e:
+        main.publish(did)
+    assert e.value.status_code == 409
+    assert "upscal" in e.value.detail.lower()
 
 
 def test_settings_roundtrips_prompt_template(tmp_path, monkeypatch):
@@ -393,3 +422,88 @@ def test_publish_refuses_a_poster_with_no_blueprint(tmp_path, monkeypatch):
         main.publish(did)
     assert e.value.status_code == 400
     assert "blueprint" in e.value.detail.lower()
+
+
+def test_settings_roundtrips_the_listing_keys(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    main.save_settings(main.SettingsBody(
+        listing_boilerplate="Printed on 200gsm matte.",
+        shop_context="wall art for first-home buyers",
+        listing_prompt="custom prompt",
+    ))
+    out = main.get_settings()
+    assert out["listing_boilerplate"] == "Printed on 200gsm matte."
+    assert out["shop_context"] == "wall art for first-home buyers"
+    assert out["listing_prompt"] == "custom prompt"
+
+
+def test_listing_prompt_falls_back_to_the_default(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    assert main.get_settings()["listing_prompt"] == listing.DEFAULT_LISTING_PROMPT
+
+
+def test_boilerplate_and_context_default_to_empty(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    out = main.get_settings()
+    assert out["listing_boilerplate"] == ""
+    assert out["shop_context"] == ""
+
+
+def test_approve_kicks_off_listing_copy(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    called = []
+    monkeypatch.setattr(main.listing, "write", lambda design_id: called.append(design_id))
+    did = insert("pending")
+    main.approve(did)
+    assert called == [did]
+
+
+def test_a_listing_failure_does_not_break_approve(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    def boom(design_id): raise RuntimeError("gemma down")
+    monkeypatch.setattr(main.listing, "write", boom)
+    did = insert("pending")
+    with pytest.raises(RuntimeError):
+        main.approve(did)
+    # the design is still approved - the status write happens before the call
+    with db.connect() as con:
+        row = con.execute("SELECT status FROM designs WHERE id = ?", (did,)).fetchone()
+    assert row["status"] == "approved"
+
+
+def _read(did):
+    with db.connect() as con:
+        return con.execute("SELECT * FROM designs WHERE id = ?", (did,)).fetchone()
+
+
+def test_patch_saves_the_listing_fields(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    did = insert("approved")
+    main.patch_design(did, main.PatchBody(
+        listing_title="  A Better Title  ", listing_hook="Hand-drawn."))
+    row = _read(did)
+    assert row["listing_title"] == "A Better Title"
+    assert row["listing_hook"] == "Hand-drawn."
+
+
+def test_patch_applies_the_tag_limits_to_hand_typed_tags(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    did = insert("approved")
+    main.patch_design(did, main.PatchBody(
+        listing_tags="Dog Dad, dog dad, %s, ok" % ("x" * 25)))
+    assert _read(did)["listing_tags"] == "dog dad,ok"
+
+
+def test_patch_clamps_a_hand_typed_title(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    did = insert("approved")
+    main.patch_design(did, main.PatchBody(listing_title="y" * 200))
+    assert len(_read(did)["listing_title"]) == listing.TITLE_MAX
+
+
+def test_patch_can_clear_a_listing_field(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    did = insert("approved")
+    main.patch_design(did, main.PatchBody(listing_hook="something"))
+    main.patch_design(did, main.PatchBody(listing_hook=""))
+    assert _read(did)["listing_hook"] == ""

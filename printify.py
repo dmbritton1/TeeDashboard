@@ -4,6 +4,7 @@ import base64
 import requests
 
 import db
+import listing
 import pipeline
 
 API = "https://api.printify.com/v1"
@@ -56,6 +57,18 @@ def _select_variants(product: str, variants: list) -> list:
     return [v for v in variants if v["options"].get("color") in COLORS] or variants[:10]
 
 
+def _description(design: dict) -> str:
+    """Generated hook plus the operator's fixed block.
+
+    The boilerplate is a setting rather than model output on purpose: paper
+    weight, sizes and delivery are promises to a buyer, and a model asked to
+    write them invents them.
+    """
+    parts = [p.strip() for p in (design.get("listing_hook"),
+                                 db.get_setting("listing_boilerplate")) if p and p.strip()]
+    return "\n\n".join(parts) if parts else design["phrase"]
+
+
 def publish(design: dict) -> str:
     shop_id = db.get_setting("printify_shop_id")
     product = design.get("product") or pipeline.DEFAULT_PRODUCT
@@ -84,8 +97,10 @@ def publish(design: dict) -> str:
     product_json = _post(
         "/shops/%s/products.json" % shop_id,
         {
-            "title": design["phrase"].title() + " " + data["title_suffix"],
-            "description": design["phrase"],
+            "title": design.get("listing_title")
+                     or design["phrase"].title() + " " + data["title_suffix"],
+            "description": _description(design),
+            "tags": listing.clean_tags(design.get("listing_tags") or ""),
             "blueprint_id": blueprint_id,
             "print_provider_id": pp_id,
             "variants": [

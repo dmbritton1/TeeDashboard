@@ -275,6 +275,8 @@ async function saveSettings() {
     printify_shop_id: document.getElementById("printify_shop").value,
     printify_poster_blueprint_id: document.getElementById("printify_poster_blueprint").value,
     access_code: code,
+    shop_context: document.getElementById("shop_context").value,
+    listing_boilerplate: document.getElementById("listing_boilerplate").value,
   };
   try {
     await api("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
@@ -389,7 +391,11 @@ function syncChildren(container, items) {
     let el = old.get(it.key);
     if (el) {
       old.delete(it.key);
-      if (el.__sig !== it.html) {
+      // Never rebuild a card the user is typing in: replaceWith would drop the
+      // element under the cursor and lose the edit. It re-syncs on the next
+      // poll after focus moves away.
+      const focused = el.contains(document.activeElement);
+      if (el.__sig !== it.html && !focused) {
         const fresh = buildEl(it);
         adoptImage(el, fresh);
         el.replaceWith(fresh);
@@ -450,6 +456,31 @@ function creepTick() {
 }
 setInterval(creepTick, 120);
 
+// Approved designs carry their Etsy copy here. Collapsed by default so the
+// review grid stays a grid; the fields save on blur through the same PATCH
+// route that already handles tags and rating.
+function listingBox(d) {
+  // Published designs are out of scope for editing (spec's non-goal is
+  // rewriting copy for an already-published listing), so the box only ever
+  // shows for "approved" - once published it just disappears.
+  if (d.status !== "approved") return "";
+  const waiting = !d.listing_title && !d.listing_hook && !d.listing_tags;
+  if (waiting && !d.error) {
+    // Only designs whose listing.write job is still plausibly in flight get
+    // the "writing…" placeholder. A design approved before this feature
+    // existed (or long enough ago that the one Gemma call would have
+    // finished or errored by now) has no job coming - say nothing rather
+    // than promise a copy that will never arrive.
+    const inFlight = d.reviewed_at &&
+      (Date.now() - new Date(d.reviewed_at + "Z")) < 3 * 60 * 1000;
+    return inFlight ? `<div class="prompt none">writing listing copy…</div>` : "";
+  }
+  return `<details class="prompt listing"><summary>listing copy</summary>` +
+    `<label>Title</label><textarea data-f="listing_title" data-id="${d.id}" rows="2">${esc(d.listing_title || "")}</textarea>` +
+    `<label>Tags (max 13, 20 chars each - longer ones are dropped)</label><textarea data-f="listing_tags" data-id="${d.id}" rows="2">${esc(d.listing_tags || "")}</textarea>` +
+    `<label>Hook</label><textarea data-f="listing_hook" data-id="${d.id}" rows="4">${esc(d.listing_hook || "")}</textarea>` +
+    `</details>`;
+}
 function card(d) {
 
   const generating = d.status === "queued" || d.status === "generating";
@@ -476,6 +507,7 @@ function card(d) {
   return `<div class="card${selected.has(d.id) ? " selected" : ""}" data-id="${d.id}" data-product="${d.product || "tee"}"><div class="frame">${pick}${img}</div><div class="body"><div class="phrase">${esc(d.phrase)}</div>` +
     `<div class="filters">${esc(d.filters)}</div>` +
     promptLine(d) +
+    listingBox(d) +
     (d.error ? `<div class="error">${esc(d.error)}</div>` : "") +
     `</div><div class="actions">${buttons}</div></div>`;
 }
@@ -876,6 +908,9 @@ async function loadPrompt() {
       `<option value="${o.value}" ${o.value === s.poster_size ? "selected" : ""}>${o.label}</option>`).join("");
     document.getElementById("poster_blueprint_state").textContent =
       s.printify_poster_blueprint_id ? "blueprint saved ✓" : "not set — posters can't publish yet";
+    document.getElementById("shop_context").value = s.shop_context || "";
+    document.getElementById("listing_boilerplate").value = s.listing_boilerplate || "";
+    document.getElementById("listing_prompt").value = s.listing_prompt || "";
     promptLoaded = true;
   } catch (e) {}
 }
@@ -907,6 +942,37 @@ document.getElementById("refine_box").addEventListener("input", () => {
     } catch (e) { flash("Couldn't save the system prompt — " + e.message); }
   }, 600);
 });
+// listing_prompt is excluded from saveSettings on purpose: that field is
+// pre-filled with the resolved default at load, so posting it on every
+// unrelated Save (e.g. the Printify token) would freeze today's default as
+// an explicit per-shop setting and future default improvements would never
+// reach this operator. Save it only when actually edited, same shape as
+// prompt_box above.
+let listingPromptSaveTimer;
+document.getElementById("listing_prompt").addEventListener("input", () => {
+  if (!promptLoaded) return;
+  clearTimeout(listingPromptSaveTimer);
+  listingPromptSaveTimer = setTimeout(async () => {
+    try {
+      await api("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({listing_prompt: document.getElementById("listing_prompt").value})});
+    } catch (e) { flash("Couldn't save the listing prompt — " + e.message); }
+  }, 600);
+});
+// Save a listing field when the user leaves it. Delegated from document so it
+// keeps working across card rebuilds. blur does not bubble, hence capture.
+document.addEventListener("blur", async e => {
+  const t = e.target;
+  if (!t.dataset || !t.dataset.f || !t.dataset.id) return;
+  try {
+    await api(`/api/designs/${t.dataset.id}`, {
+      method: "PATCH",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({[t.dataset.f]: t.value}),
+    });
+    refresh();
+  } catch (err) { flash("Couldn't save the listing copy — " + err.message); }
+}, true);
 async function copyPrompt() {
   const el = document.getElementById("prompt_box");
   try { await navigator.clipboard.writeText(el.value); flash("Prompt copied"); }

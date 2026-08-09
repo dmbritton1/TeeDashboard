@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
 import db
+import listing
 import pipeline
 import printify
 import refine
@@ -71,6 +72,9 @@ class GenerateBody(BaseModel):
 class PatchBody(BaseModel):
     tags: str | None = None
     rating: int | None = None
+    listing_title: str | None = None
+    listing_tags: str | None = None
+    listing_hook: str | None = None
 
 
 class TestBody(BaseModel):
@@ -92,6 +96,9 @@ class SettingsBody(BaseModel):
     poster_size: str = ""
     printify_poster_blueprint_id: str = ""
     refine_prompt_poster: str = ""
+    listing_prompt: str = ""
+    listing_boilerplate: str = ""
+    shop_context: str = ""
 
 
 def _product(name: str) -> str:
@@ -178,7 +185,7 @@ def list_designs():
 
 
 @app.patch("/api/designs/{design_id}")
-def patch_design(design_id: int, body: PatchBody):
+def patch_design(design_id: int, body: PatchBody, _gate: None = Depends(require_access_code)):
     sets, vals = [], []
     if body.tags is not None:
         sets.append("tags = ?")
@@ -186,6 +193,16 @@ def patch_design(design_id: int, body: PatchBody):
     if body.rating is not None:
         sets.append("rating = ?")
         vals.append(max(0, min(5, body.rating)))
+    if body.listing_title is not None:
+        sets.append("listing_title = ?")
+        vals.append(listing.clamp_title(body.listing_title))
+    if body.listing_tags is not None:
+        # hand-typed tags go through the same limits as generated ones
+        sets.append("listing_tags = ?")
+        vals.append(",".join(listing.clean_tags(body.listing_tags)))
+    if body.listing_hook is not None:
+        sets.append("listing_hook = ?")
+        vals.append(body.listing_hook.strip())
     if not sets:
         raise HTTPException(400, "Nothing to update")
     with db.connect() as con:
@@ -236,6 +253,7 @@ def approve(design_id: int, _gate: None = Depends(require_access_code)):
         row = con.execute("SELECT file FROM designs WHERE id = ?", (design_id,)).fetchone()
     if row and row["file"]:
         upscale.upscale(design_id, os.path.join(BASE, row["file"]))
+    listing.write(design_id)
     return {"ok": True}
 
 
@@ -294,7 +312,7 @@ def publish(design_id: int, _gate: None = Depends(require_access_code)):
     if not (db.get_setting(data["blueprint_key"]) or data["blueprint_default"]):
         raise HTTPException(400, "No Printify blueprint configured for %s - "
                                  "add one in settings" % data["label"])
-    if not row["print_file"] and not row["error"]:
+    if not row["print_file"] and "upscale failed" not in (row["error"] or ""):
         raise HTTPException(409, "Design is still upscaling - try again shortly")
     row = dict(row)
     if row["file"]:
@@ -336,6 +354,9 @@ def get_settings():
          "label": "%dx%d — %d dpi" % (w, h, pipeline.poster_dpi(w, h))}
         for w, h in pipeline.POSTER_LADDER
     ]
+    out["listing_prompt"] = db.get_setting("listing_prompt") or listing.DEFAULT_LISTING_PROMPT
+    out["listing_boilerplate"] = db.get_setting("listing_boilerplate") or ""
+    out["shop_context"] = db.get_setting("shop_context") or ""
     return out
 
 
