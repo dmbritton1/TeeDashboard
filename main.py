@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
 import db
+import listing
 import pipeline
 import printify
 import refine
@@ -92,6 +93,9 @@ class SettingsBody(BaseModel):
     poster_size: str = ""
     printify_poster_blueprint_id: str = ""
     refine_prompt_poster: str = ""
+    listing_prompt: str = ""
+    listing_boilerplate: str = ""
+    shop_context: str = ""
 
 
 def _product(name: str) -> str:
@@ -336,6 +340,9 @@ def get_settings():
          "label": "%dx%d — %d dpi" % (w, h, pipeline.poster_dpi(w, h))}
         for w, h in pipeline.POSTER_LADDER
     ]
+    out["listing_prompt"] = db.get_setting("listing_prompt") or listing.DEFAULT_LISTING_PROMPT
+    out["listing_boilerplate"] = db.get_setting("listing_boilerplate") or ""
+    out["shop_context"] = db.get_setting("shop_context") or ""
     return out
 
 

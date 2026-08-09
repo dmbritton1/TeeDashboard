@@ -6,6 +6,7 @@ import pytest
 from fastapi import HTTPException
 
 import db
+import listing
 import pipeline
 import worker
 
@@ -393,3 +394,28 @@ def test_publish_refuses_a_poster_with_no_blueprint(tmp_path, monkeypatch):
         main.publish(did)
     assert e.value.status_code == 400
     assert "blueprint" in e.value.detail.lower()
+
+
+def test_settings_roundtrips_the_listing_keys(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    main.save_settings(main.SettingsBody(
+        listing_boilerplate="Printed on 200gsm matte.",
+        shop_context="wall art for first-home buyers",
+        listing_prompt="custom prompt",
+    ))
+    out = main.get_settings()
+    assert out["listing_boilerplate"] == "Printed on 200gsm matte."
+    assert out["shop_context"] == "wall art for first-home buyers"
+    assert out["listing_prompt"] == "custom prompt"
+
+
+def test_listing_prompt_falls_back_to_the_default(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    assert main.get_settings()["listing_prompt"] == listing.DEFAULT_LISTING_PROMPT
+
+
+def test_boilerplate_and_context_default_to_empty(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    out = main.get_settings()
+    assert out["listing_boilerplate"] == ""
+    assert out["shop_context"] == ""

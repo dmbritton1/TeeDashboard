@@ -66,3 +66,32 @@ def test_product_column_defaults_to_tee(tmp_path, monkeypatch):
         con.execute("INSERT INTO designs (phrase) VALUES ('dog dad')")
         row = con.execute("SELECT product FROM designs").fetchone()
     assert row["product"] == "tee"
+
+
+def test_listing_columns_exist(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "test.db"))
+    db.init()
+    with db.connect() as con:
+        cols = {r["name"] for r in con.execute("PRAGMA table_info(designs)")}
+    assert {"listing_title", "listing_tags", "listing_hook"} <= cols
+
+
+def test_listing_tags_defaults_to_empty_string_not_null(tmp_path, monkeypatch):
+    # printify splits this on "," - a NULL would be a TypeError at publish time
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "test.db"))
+    db.init()
+    with db.connect() as con:
+        con.execute("INSERT INTO designs (phrase) VALUES ('x')")
+        row = con.execute("SELECT listing_tags FROM designs").fetchone()
+    assert row["listing_tags"] == ""
+
+
+def test_listing_columns_are_added_to_a_pre_existing_table(tmp_path, monkeypatch):
+    # the migration path real databases take, not the fresh-schema one
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "test.db"))
+    with db.connect() as con:
+        con.execute("CREATE TABLE designs (id INTEGER PRIMARY KEY, phrase TEXT NOT NULL)")
+    db.init()
+    with db.connect() as con:
+        cols = {r["name"] for r in con.execute("PRAGMA table_info(designs)")}
+    assert {"listing_title", "listing_tags", "listing_hook"} <= cols
