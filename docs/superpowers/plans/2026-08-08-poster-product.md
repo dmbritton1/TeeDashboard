@@ -1790,3 +1790,8 @@ State these plainly rather than letting them look finished:
 - **Poster publishing is written but unproven.** The saved token 401s on `/shops.json` and on poster variant listings, so `POSTER_VARIANT_MATCH` and `price_cents: 3499` are educated guesses. Both are single-line corrections once a token with shop scope exists. The tee publish path is equally unproven, and was before this work.
 - **1440x2016 is still unreachable.** 292 dpi denoises in 8 seconds but its VAE decode never finished in 23 minutes. The untested lead is raising `tile_latent_min_size`, which could cut decode roughly 3x. Not in this plan.
 - **195 dpi is below a typical 300 dpi print spec**, above the 150 dpi large-format floor.
+- **The poster template invites a mockup.** The composition run settled that 5:7
+  does not duplicate subjects, but the model rendered the artwork as a framed
+  print with a white border and drop shadow - "Fine-art poster print:" reads as
+  a picture OF a print. Recorded in probe/RESULT.txt; needs one prompt-tuning
+  pass on POSTER_TEMPLATE before selling. Crops fine meanwhile.
