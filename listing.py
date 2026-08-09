@@ -6,6 +6,8 @@ enforced here rather than trusted to the model: asked for "13 tags under 20
 characters" it returns 15 tags and a 24-character one.
 """
 
+import threading
+
 import db
 import pipeline
 import refine
@@ -123,6 +125,66 @@ def generate(phrase: str, filters: str, product: str | None, context: str,
     if not out:
         raise RuntimeError("Gemma returned no usable listing copy")
     return out
+
+
+def recent_tags(limit: int = 20) -> list[str]:
+    """Tags already used on recently published designs, newest first.
+
+    Etsy ranks down shops that repeat the same tags across listings, so these
+    are handed to the model as terms to vary from. Returns [] until something
+    has actually been published, which is why no caller needs a branch.
+    """
+    with db.connect() as con:
+        rows = con.execute(
+            "SELECT listing_tags FROM designs WHERE status = 'published' "
+            "AND listing_tags != '' ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+    out = []
+    for row in rows:
+        for tag in row["listing_tags"].split(","):
+            tag = tag.strip()
+            if tag and tag not in out:
+                out.append(tag)
+    return out
+
+
+def write(design_id: int) -> None:
+    """Fire-and-forget: generate this design's listing copy and store it.
+
+    Same shape and same rule as upscale.upscale - the design stays approved and
+    publish falls back to the old title, because a copywriting failure must
+    never block a publish.
+    """
+
+    def job():
+        try:
+            with db.connect() as con:
+                row = con.execute(
+                    "SELECT phrase, filters, product FROM designs WHERE id = ?", (design_id,)
+                ).fetchone()
+            if not row:
+                return
+            out = generate(
+                row["phrase"], row["filters"], row["product"],
+                db.get_setting("shop_context") or "",
+                recent_tags(),
+                db.get_setting("listing_prompt") or DEFAULT_LISTING_PROMPT,
+            )
+            with db.connect() as con:
+                con.execute(
+                    "UPDATE designs SET listing_title = ?, listing_tags = ?, "
+                    "listing_hook = ?, error = NULL WHERE id = ?",
+                    (out.get("title", ""), ",".join(out.get("tags", [])),
+                     out.get("hook", ""), design_id),
+                )
+        except Exception as e:
+            with db.connect() as con:
+                con.execute(
+                    "UPDATE designs SET error = ? WHERE id = ?",
+                    (("listing copy failed: %s" % e)[:500], design_id),
+                )
+
+    threading.Thread(target=job, daemon=True).start()
 
 
 if __name__ == "__main__":

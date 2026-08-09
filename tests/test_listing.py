@@ -151,3 +151,70 @@ def test_default_prompt_forbids_invented_facts():
 
 def test_defaults_cover_the_settings_key():
     assert listing.DEFAULTS["listing_prompt"] is listing.DEFAULT_LISTING_PROMPT
+
+
+def _row(design_id=1):
+    with db.connect() as con:
+        return dict(con.execute("SELECT * FROM designs WHERE id = ?", (design_id,)).fetchone())
+
+
+def _seed(phrase="dog dad", status="approved"):
+    with db.connect() as con:
+        con.execute("INSERT INTO designs (phrase, filters, product, status) VALUES (?,?,?,?)",
+                    (phrase, "", "tee", status))
+
+
+class _NowThread:
+    """A Thread stand-in that runs the job inline when .start() is called."""
+    def __init__(self, target, daemon=None): self.target = target
+    def start(self): self.target()
+
+
+def _write_sync(monkeypatch, design_id):
+    """Run listing.write's job on this thread so assertions see the result."""
+    monkeypatch.setattr(listing.threading, "Thread", _NowThread)
+    listing.write(design_id)
+
+
+def test_write_stores_all_three_fields(tmp_path, monkeypatch):
+    _db(tmp_path, monkeypatch)
+    _seed()
+    monkeypatch.setattr(listing, "generate",
+                        lambda *a, **k: {"title": "T", "tags": ["a", "b"], "hook": "H"})
+    _write_sync(monkeypatch, 1)
+    row = _row()
+    assert row["listing_title"] == "T"
+    assert row["listing_tags"] == "a,b"
+    assert row["listing_hook"] == "H"
+
+
+def test_write_records_the_error_and_leaves_the_design_alone_on_failure(tmp_path, monkeypatch):
+    _db(tmp_path, monkeypatch)
+    _seed()
+    def boom(*a, **k): raise RuntimeError("quota exhausted")
+    monkeypatch.setattr(listing, "generate", boom)
+    _write_sync(monkeypatch, 1)
+    row = _row()
+    assert "quota exhausted" in row["error"]
+    assert row["status"] == "approved"      # never un-approves
+    assert row["listing_title"] is None
+
+
+def test_write_is_a_no_op_for_a_missing_design(tmp_path, monkeypatch):
+    _db(tmp_path, monkeypatch)
+    _write_sync(monkeypatch, 999)      # must not raise
+
+
+def test_recent_tags_reads_published_designs_newest_first(tmp_path, monkeypatch):
+    _db(tmp_path, monkeypatch)
+    with db.connect() as con:
+        con.execute("INSERT INTO designs (phrase, status, listing_tags) VALUES ('a','published','one,two')")
+        con.execute("INSERT INTO designs (phrase, status, listing_tags) VALUES ('b','published','two,three')")
+        con.execute("INSERT INTO designs (phrase, status, listing_tags) VALUES ('c','approved','ignored')")
+    assert listing.recent_tags() == ["two", "three", "one"]
+
+
+def test_recent_tags_is_empty_before_anything_is_published(tmp_path, monkeypatch):
+    _db(tmp_path, monkeypatch)
+    _seed()
+    assert listing.recent_tags() == []

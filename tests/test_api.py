@@ -33,6 +33,7 @@ def insert(status="pending", **kw):
 
 def test_approve_sets_reviewed_at(tmp_path, monkeypatch):
     main = load_main(tmp_path, monkeypatch)
+    monkeypatch.setattr(main.listing, "write", lambda design_id: None)
     did = insert("pending")
     main.approve(did)
     with db.connect() as con:
@@ -419,3 +420,25 @@ def test_boilerplate_and_context_default_to_empty(tmp_path, monkeypatch):
     out = main.get_settings()
     assert out["listing_boilerplate"] == ""
     assert out["shop_context"] == ""
+
+
+def test_approve_kicks_off_listing_copy(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    called = []
+    monkeypatch.setattr(main.listing, "write", lambda design_id: called.append(design_id))
+    did = insert("pending")
+    main.approve(did)
+    assert called == [did]
+
+
+def test_a_listing_failure_does_not_break_approve(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    def boom(design_id): raise RuntimeError("gemma down")
+    monkeypatch.setattr(main.listing, "write", boom)
+    did = insert("pending")
+    with pytest.raises(RuntimeError):
+        main.approve(did)
+    # the design is still approved - the status write happens before the call
+    with db.connect() as con:
+        row = con.execute("SELECT status FROM designs WHERE id = ?", (did,)).fetchone()
+    assert row["status"] == "approved"

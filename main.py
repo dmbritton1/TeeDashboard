@@ -240,6 +240,7 @@ def approve(design_id: int, _gate: None = Depends(require_access_code)):
         row = con.execute("SELECT file FROM designs WHERE id = ?", (design_id,)).fetchone()
     if row and row["file"]:
         upscale.upscale(design_id, os.path.join(BASE, row["file"]))
+    listing.write(design_id)
     return {"ok": True}
 
 
