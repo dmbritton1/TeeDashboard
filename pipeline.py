@@ -89,9 +89,11 @@ def style_filters(style_label: str, filters: str) -> str:
     return ", ".join(parts)
 
 
-def build_prompt(phrase: str, filters: str) -> str:
+def build_prompt(phrase: str, filters: str, product: str = "tee") -> str:
+    """Wrap a phrase in its product's template. The default keeps every caller
+    that predates posters producing exactly the prompt it produced before."""
     style = f"Style: {filters}. " if filters else ""
-    return PROMPT_TEMPLATE.format(phrase=phrase, style=style)
+    return product_data(product)["template"].format(phrase=phrase, style=style)
 
 
 ZIMAGE_MODEL = "Tongyi-MAI/Z-Image-Turbo"

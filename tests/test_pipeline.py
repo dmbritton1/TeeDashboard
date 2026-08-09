@@ -431,3 +431,26 @@ def test_poster_aspect_is_the_5_7_the_ladder_generates():
 
 def test_tee_blueprint_default_is_the_gildan_tee_it_always_was():
     assert pipeline.PRODUCTS["tee"]["blueprint_default"] == "6"
+
+
+def test_build_prompt_defaults_to_the_tee_template():
+    # every existing caller passes two arguments and must keep getting a tee
+    assert build_prompt("dog dad", "") == build_prompt("dog dad", "", "tee")
+    assert "t-shirt" in build_prompt("dog dad", "").lower()
+
+
+def test_build_prompt_uses_the_poster_template_for_posters():
+    p = build_prompt("a lighthouse at sunset", "art deco", "poster")
+    assert "poster print" in p.lower()
+    assert "t-shirt" not in p.lower()
+    assert "a lighthouse at sunset" in p and "art deco" in p
+
+
+def test_build_prompt_style_clause_works_for_both_products():
+    for product in pipeline.PRODUCTS:
+        assert "Style:" not in build_prompt("dog dad", "", product)
+        assert "Style: vintage." in build_prompt("dog dad", "vintage", product)
+
+
+def test_build_prompt_falls_back_to_tee_on_an_unknown_product():
+    assert build_prompt("dog dad", "", "hoodie") == build_prompt("dog dad", "")
