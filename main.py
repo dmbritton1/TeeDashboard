@@ -290,6 +290,10 @@ def publish(design_id: int, _gate: None = Depends(require_access_code)):
         ).fetchone()
     if not row:
         raise HTTPException(409, "Design must be approved first")
+    data = pipeline.product_data(row["product"])
+    if not (db.get_setting(data["blueprint_key"]) or data["blueprint_default"]):
+        raise HTTPException(400, "No Printify blueprint configured for %s - "
+                                 "add one in settings" % data["label"])
     if not row["print_file"] and not row["error"]:
         raise HTTPException(409, "Design is still upscaling - try again shortly")
     row = dict(row)
