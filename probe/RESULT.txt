@@ -55,6 +55,19 @@ steering weakly in general: it says "no frame, no border" and the image has a
 prominent frame - expected, since Z-Image-Turbo runs at guidance_scale=0.0 and
 without classifier-free guidance negative phrasing barely binds.
 
-Settling it needs one ~20 min run at 960x1344 with a single-subject prompt and no
-symmetry language. One subject means the aspect ratio is fine; two means real
-duplication and poster prompts need composition guardrails.
+SETTLED 2026-08-08, second run: probe/subject-test.png, same 960x1344, prompt
+built from the poster template with "a lighthouse on a cliff at sunset" + art
+deco and no symmetry language. Took 16.4 min. Result: ONE lighthouse, exactly
+once, composed for the vertical - tower filling the height, cliff foreground,
+sea horizon behind. Measured mirror symmetry: left-right 30.65, top-bottom
+74.78 against a random-shuffle baseline of 68.12. Top-bottom is ABOVE the
+baseline - the halves are more different than chance, i.e. zero vertical
+mirroring - and left-right 30.65 is ordinary centered-subject similarity, not
+duplication. The first run's ornament was the prompt's doing; the aspect ratio
+is fine. No composition guardrails needed in the poster template.
+
+One follow-up observed, not a blocker: the model rendered the artwork as a
+framed print with a white border and drop shadow - "Fine-art poster print:"
+read as a picture OF a print. The template asks for edge-to-edge positively,
+but the noun phrase itself invites the mockup framing. Worth one prompt-tuning
+pass ("poster artwork of ..." or similar) before selling; crops fine meanwhile.
