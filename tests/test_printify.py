@@ -2,6 +2,7 @@
 import pytest
 
 import db
+import listing
 import pipeline
 import printify
 
@@ -110,3 +111,73 @@ def test_publish_still_treats_a_design_with_no_product_as_a_tee(tmp_path, monkey
     assert product_call["title"] == "Dog Dad T-Shirt"
     assert product_call["blueprint_id"] == 6
     assert [v["price"] for v in product_call["variants"]] == [2499, 2499]
+
+
+def _publish(tmp_path, monkeypatch, design):
+    src = tmp_path / "art.png"
+    src.write_bytes(b"PNG")
+    calls = []
+    _fake_api(monkeypatch, calls, TEE_VARIANTS)
+    base = {"id": 1, "phrase": "dog dad", "product": "tee",
+            "file": str(src), "print_file": None}
+    printify.publish({**base, **design})
+    return [p for path, p in calls if path.endswith("/products.json")][0]
+
+
+def test_publish_sends_the_stored_title_and_tags(tmp_path, monkeypatch):
+    setup_tmp(tmp_path, monkeypatch)
+    call = _publish(tmp_path, monkeypatch, {
+        "listing_title": "Dog Dad Print, Funny Gift",
+        "listing_tags": "dog dad,funny gift,pet lover",
+    })
+    assert call["title"] == "Dog Dad Print, Funny Gift"
+    assert call["tags"] == ["dog dad", "funny gift", "pet lover"]
+
+
+def test_publish_caps_the_tags_at_thirteen(tmp_path, monkeypatch):
+    setup_tmp(tmp_path, monkeypatch)
+    call = _publish(tmp_path, monkeypatch, {
+        "listing_tags": ",".join("tag%d" % i for i in range(20))})
+    assert len(call["tags"]) == listing.TAG_COUNT
+
+
+def test_publish_reapplies_the_limits_to_whatever_was_stored(tmp_path, monkeypatch):
+    # publish is the last gate: a row edited outside the app still can't ship
+    # an over-long or duplicated tag
+    setup_tmp(tmp_path, monkeypatch)
+    call = _publish(tmp_path, monkeypatch, {
+        "listing_tags": "Dog Dad, dog dad, %s" % ("x" * 25)})
+    assert call["tags"] == ["dog dad"]
+
+
+def test_publish_sends_an_empty_tag_list_when_there_is_no_copy(tmp_path, monkeypatch):
+    setup_tmp(tmp_path, monkeypatch)
+    call = _publish(tmp_path, monkeypatch, {})
+    assert call["tags"] == []
+
+
+def test_publish_falls_back_to_the_old_title_without_stored_copy(tmp_path, monkeypatch):
+    setup_tmp(tmp_path, monkeypatch)
+    call = _publish(tmp_path, monkeypatch, {})
+    assert call["title"] == "Dog Dad T-Shirt"
+    assert call["description"] == "dog dad"
+
+
+def test_description_joins_the_hook_and_the_boilerplate(tmp_path, monkeypatch):
+    setup_tmp(tmp_path, monkeypatch)
+    db.set_setting("listing_boilerplate", "Printed on 200gsm matte.")
+    assert printify._description({"phrase": "dog dad", "listing_hook": "A good dog."}) == \
+        "A good dog.\n\nPrinted on 200gsm matte."
+
+
+def test_description_uses_whichever_half_exists(tmp_path, monkeypatch):
+    setup_tmp(tmp_path, monkeypatch)
+    assert printify._description({"phrase": "dog dad", "listing_hook": "A good dog."}) == \
+        "A good dog."
+    db.set_setting("listing_boilerplate", "200gsm matte.")
+    assert printify._description({"phrase": "dog dad", "listing_hook": None}) == "200gsm matte."
+
+
+def test_description_falls_back_to_the_phrase_when_both_are_empty(tmp_path, monkeypatch):
+    setup_tmp(tmp_path, monkeypatch)
+    assert printify._description({"phrase": "dog dad", "listing_hook": None}) == "dog dad"
