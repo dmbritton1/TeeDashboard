@@ -72,6 +72,9 @@ class GenerateBody(BaseModel):
 class PatchBody(BaseModel):
     tags: str | None = None
     rating: int | None = None
+    listing_title: str | None = None
+    listing_tags: str | None = None
+    listing_hook: str | None = None
 
 
 class TestBody(BaseModel):
@@ -190,6 +193,16 @@ def patch_design(design_id: int, body: PatchBody):
     if body.rating is not None:
         sets.append("rating = ?")
         vals.append(max(0, min(5, body.rating)))
+    if body.listing_title is not None:
+        sets.append("listing_title = ?")
+        vals.append(listing.clamp_title(body.listing_title))
+    if body.listing_tags is not None:
+        # hand-typed tags go through the same limits as generated ones
+        sets.append("listing_tags = ?")
+        vals.append(",".join(listing.clean_tags(body.listing_tags)))
+    if body.listing_hook is not None:
+        sets.append("listing_hook = ?")
+        vals.append(body.listing_hook.strip())
     if not sets:
         raise HTTPException(400, "Nothing to update")
     with db.connect() as con:

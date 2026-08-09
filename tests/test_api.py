@@ -442,3 +442,41 @@ def test_a_listing_failure_does_not_break_approve(tmp_path, monkeypatch):
     with db.connect() as con:
         row = con.execute("SELECT status FROM designs WHERE id = ?", (did,)).fetchone()
     assert row["status"] == "approved"
+
+
+def _read(did):
+    with db.connect() as con:
+        return con.execute("SELECT * FROM designs WHERE id = ?", (did,)).fetchone()
+
+
+def test_patch_saves_the_listing_fields(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    did = insert("approved")
+    main.patch_design(did, main.PatchBody(
+        listing_title="  A Better Title  ", listing_hook="Hand-drawn."))
+    row = _read(did)
+    assert row["listing_title"] == "A Better Title"
+    assert row["listing_hook"] == "Hand-drawn."
+
+
+def test_patch_applies_the_tag_limits_to_hand_typed_tags(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    did = insert("approved")
+    main.patch_design(did, main.PatchBody(
+        listing_tags="Dog Dad, dog dad, %s, ok" % ("x" * 25)))
+    assert _read(did)["listing_tags"] == "dog dad,ok"
+
+
+def test_patch_clamps_a_hand_typed_title(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    did = insert("approved")
+    main.patch_design(did, main.PatchBody(listing_title="y" * 200))
+    assert len(_read(did)["listing_title"]) == listing.TITLE_MAX
+
+
+def test_patch_can_clear_a_listing_field(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    did = insert("approved")
+    main.patch_design(did, main.PatchBody(listing_hook="something"))
+    main.patch_design(did, main.PatchBody(listing_hook=""))
+    assert _read(did)["listing_hook"] == ""
