@@ -323,3 +323,21 @@ def test_build_zimage_leaves_attention_alone_off_rocm(monkeypatch):
     # CUDA has flash attention, so chunking would only cost kernel launches
     _mock_zimage_build(monkeypatch, hip=False)
     pipeline._chunk_attention_globally.assert_not_called()
+
+
+def test_poster_template_takes_the_same_placeholders_as_the_tee_one():
+    filled = pipeline.POSTER_TEMPLATE.format(phrase="a lighthouse", style="Style: art deco. ")
+    assert "a lighthouse" in filled and "art deco" in filled
+
+
+def test_poster_template_says_what_it_wants_not_what_it_doesnt():
+    # Z-Image-Turbo runs at guidance_scale=0.0, so with no classifier-free guidance
+    # negative phrasing barely binds - the probe asked for "no frame, no border" and
+    # got a prominent frame. This template must not repeat that mistake.
+    assert "no " not in pipeline.POSTER_TEMPLATE.lower()
+
+
+def test_poster_template_asks_for_one_subject_filling_a_tall_canvas():
+    t = pipeline.POSTER_TEMPLATE.lower()
+    assert "one clear focal subject" in t
+    assert "edge to edge" in t

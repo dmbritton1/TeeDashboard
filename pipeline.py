@@ -6,6 +6,17 @@ PROMPT_TEMPLATE = (
     "No shirt, no mockup, no watermark - just the artwork itself."
 )
 
+# Unlike PROMPT_TEMPLATE this states what it wants rather than what it doesn't.
+# Z-Image-Turbo runs at guidance_scale=0.0, so with no classifier-free guidance
+# negative phrasing barely binds - the size probe's prompt said "no frame, no
+# border" and the image came out with a prominent frame.
+POSTER_TEMPLATE = (
+    "Fine-art poster print: {phrase}. "
+    "{style}One clear focal subject, upright vertical composition, "
+    "artwork running edge to edge and filling the whole canvas, "
+    "clear foreground and distant background."
+)
+
 
 def parse_input(text: str) -> list[tuple[str, str]]:
     """Parse pasted 'phrase | filter1, filter2' lines into (phrase, filter) tuples,

@@ -15,6 +15,22 @@ DEFAULT_REFINE_PROMPT = (
     "{n}, one per line."
 )
 
+DEFAULT_REFINE_PROMPT_POSTER = (
+    "You are an art director for a print-on-demand wall-art brand. Given a concept "
+    "and optional style keywords, write {n} distinct, vivid image-generation prompts "
+    "- each a different creative interpretation. Use the style keywords as creative "
+    "direction. Every prompt must describe a single upright poster artwork with one "
+    "clear focal subject, composed for a tall 5:7 canvas and running edge to edge. "
+    "Output only the prompts, numbered 1 to {n}, one per line."
+)
+
+# Keyed by settings key so pipeline.PRODUCTS can name a prompt without importing
+# this module, and main can resolve `saved value or default` with one lookup.
+DEFAULTS = {
+    "refine_prompt": DEFAULT_REFINE_PROMPT,
+    "refine_prompt_poster": DEFAULT_REFINE_PROMPT_POSTER,
+}
+
 _NUMBERING = re.compile(r"^\s*(?:\d+[.)]|[-*])\s*")
 
 
