@@ -1,15 +1,20 @@
 """FastAPI server for the t-shirt design pipeline dashboard."""
+import asyncio
 import csv
 import datetime
+import hashlib
+import hmac
 import io
 import os
 import tempfile
+import urllib.parse
 import zipfile
 
 import requests
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Header, HTTPException
-from fastapi.responses import FileResponse, Response
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
+                               RedirectResponse, Response)
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
@@ -23,6 +28,18 @@ import worker
 
 load_dotenv()
 BASE = os.path.dirname(os.path.abspath(__file__))
+PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "").strip()
+if not PASSWORD:
+    raise SystemExit(
+        "DASHBOARD_PASSWORD is not set, so there would be no lock on the door.\n"
+        "Add this line to your .env file:\n\n"
+        "    DASHBOARD_PASSWORD=pick-something-only-you-two-know\n\n"
+        "then start the dashboard again."
+    )
+# The cookie is the hash of the password itself: no session store to keep, and
+# changing the password in .env signs everyone out for free.
+COOKIE = hashlib.sha256(PASSWORD.encode()).hexdigest()
+OPEN_PATHS = {"/login", "/logout", "/static/styles.css"}
 DEFAULT_PROMPT = (
     "Give me 20 t-shirt design ideas for [niche]. "
     "Format each as one line: phrase | style keywords. "
@@ -33,6 +50,9 @@ db.init()
 with db.connect() as con:
     # requeue rows orphaned by a shutdown mid-generation
     con.execute("UPDATE designs SET status = 'queued', progress = 0 WHERE status = 'generating'")
+    # the header gate is gone; leaving the row would keep shipping the old code
+    # in plaintext inside every /api/backup zip
+    con.execute("DELETE FROM settings WHERE key = 'access_code'")
 worker.start()
 
 app = FastAPI(title="T-Shirt Design Pipeline")
@@ -45,11 +65,59 @@ def index():
     return FileResponse(os.path.join(BASE, "static", "index.html"))
 
 
-def require_access_code(x_access_code: str | None = Header(default=None)) -> None:
-    """Gate generation once a shared code is set; open when no code exists."""
-    code = db.get_setting("access_code")
-    if code and x_access_code != code:
-        raise HTTPException(401, "Access code required")
+@app.middleware("http")
+async def require_login(request: Request, call_next):
+    """Gate everything but the login page - including the StaticFiles mounts."""
+    # bytes, not str: the ASGI server decodes cookie headers as latin-1, so a
+    # client can hand us non-ASCII, and hmac.compare_digest on str requires
+    # both sides be ASCII-only - it would raise TypeError (a 500) otherwise
+    if request.url.path not in OPEN_PATHS and not hmac.compare_digest(
+        request.cookies.get("auth", "").encode("utf-8", "replace"), COOKIE.encode()
+    ):
+        # the dashboard JS expects JSON from /api/*, not a page of HTML
+        if request.url.path.startswith("/api/"):
+            return JSONResponse({"detail": "Not signed in"}, status_code=401)
+        return RedirectResponse("/login", status_code=303)
+    return await call_next(request)
+
+
+def _login_page(error: str = ""):
+    with open(os.path.join(BASE, "static", "login.html"), encoding="utf-8") as f:
+        return HTMLResponse(f.read().replace("<!--error-->", error))
+
+
+@app.get("/login")
+def login_page():
+    return _login_page()
+
+
+@app.post("/login")
+async def login(request: Request):
+    # ponytail: parse_qs instead of fastapi.Form, which would pull in
+    # python-multipart for one field on one endpoint
+    form = urllib.parse.parse_qs((await request.body()).decode())
+    entered = (form.get("password") or [""])[0]
+    if not hmac.compare_digest(
+        hashlib.sha256(entered.encode()).hexdigest(), COOKIE
+    ):
+        # per-request, not global: concurrent guesses each pay 1s, they don't queue
+        # behind each other. Deters a casual sequential script, nothing more.
+        await asyncio.sleep(1)
+        return _login_page("Incorrect password")
+    r = RedirectResponse("/", status_code=303)
+    # cloudflared terminates TLS and forwards plain http, so trust its header;
+    # falling back to the scheme keeps the cookie usable on http://localhost
+    proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+    r.set_cookie("auth", COOKIE, max_age=2592000, httponly=True,
+                 samesite="lax", secure=proto == "https")
+    return r
+
+
+@app.post("/logout")
+def logout():
+    r = RedirectResponse("/login", status_code=303)
+    r.delete_cookie("auth")
+    return r
 
 
 def _queue_full() -> bool:
@@ -82,7 +150,6 @@ class SettingsBody(BaseModel):
     gemini_api_key: str = ""
     printify_api_token: str = ""
     printify_shop_id: str = ""
-    access_code: str = ""
     prompt_template: str = ""
     refine_prompt: str = ""
     image_model: str = ""
@@ -103,7 +170,7 @@ def _product(name: str) -> str:
 
 
 @app.post("/api/generate")
-def generate(body: GenerateBody, _gate: None = Depends(require_access_code)):
+def generate(body: GenerateBody):
     product = _product(body.product)
     items = pipeline.parse_input(body.text)
     if not items:
@@ -138,7 +205,7 @@ def generate(body: GenerateBody, _gate: None = Depends(require_access_code)):
 
 
 @app.post("/api/test")
-def generate_test(body: TestBody, _gate: None = Depends(require_access_code)):
+def generate_test(body: TestBody):
     """Queue one scratch image from the raw prompt - bypasses the t-shirt template and pipeline."""
     product = _product(body.product)
     text = body.text.strip()
@@ -198,7 +265,7 @@ def patch_design(design_id: int, body: PatchBody):
 
 
 @app.delete("/api/designs/{design_id}")
-def delete_design(design_id: int, _gate: None = Depends(require_access_code)):
+def delete_design(design_id: int):
     with db.connect() as con:
         row = con.execute("SELECT * FROM designs WHERE id = ?", (design_id,)).fetchone()
         if not row:
@@ -229,7 +296,7 @@ def _set_status(design_id: int, to: str, allowed: tuple[str, ...]) -> None:
 
 
 @app.post("/api/designs/{design_id}/approve")
-def approve(design_id: int, _gate: None = Depends(require_access_code)):
+def approve(design_id: int):
     _set_status(design_id, "approved", ("pending",))
     with db.connect() as con:
         con.execute("UPDATE designs SET reviewed_at = datetime('now') WHERE id = ?", (design_id,))
@@ -240,7 +307,7 @@ def approve(design_id: int, _gate: None = Depends(require_access_code)):
 
 
 @app.post("/api/designs/{design_id}/reject")
-def reject(design_id: int, _gate: None = Depends(require_access_code)):
+def reject(design_id: int):
     _set_status(design_id, "rejected", ("pending",))
     with db.connect() as con:
         con.execute("UPDATE designs SET reviewed_at = datetime('now') WHERE id = ?", (design_id,))
@@ -248,7 +315,7 @@ def reject(design_id: int, _gate: None = Depends(require_access_code)):
 
 
 @app.post("/api/designs/{design_id}/retry")
-def retry(design_id: int, _gate: None = Depends(require_access_code)):
+def retry(design_id: int):
     if _queue_full():
         raise HTTPException(429, "Queue is full - try again shortly")
     _set_status(design_id, "queued", ("failed", "rejected"))
@@ -256,7 +323,7 @@ def retry(design_id: int, _gate: None = Depends(require_access_code)):
 
 
 @app.post("/api/designs/{design_id}/regenerate")
-def regenerate(design_id: int, _gate: None = Depends(require_access_code)):
+def regenerate(design_id: int):
     with db.connect() as con:
         row = con.execute(
             "SELECT phrase, filters, product FROM designs WHERE id = ?", (design_id,)
@@ -273,7 +340,7 @@ def regenerate(design_id: int, _gate: None = Depends(require_access_code)):
 
 
 @app.post("/api/designs/{design_id}/unreview")
-def unreview(design_id: int, _gate: None = Depends(require_access_code)):
+def unreview(design_id: int):
     _set_status(design_id, "pending", ("approved", "rejected"))
     with db.connect() as con:
         con.execute("UPDATE designs SET reviewed_at = NULL WHERE id = ?", (design_id,))
@@ -281,7 +348,7 @@ def unreview(design_id: int, _gate: None = Depends(require_access_code)):
 
 
 @app.post("/api/designs/{design_id}/publish")
-def publish(design_id: int, _gate: None = Depends(require_access_code)):
+def publish(design_id: int):
     if not (db.get_setting("printify_api_token") and db.get_setting("printify_shop_id")):
         raise HTTPException(400, "Printify not configured - add your token and shop ID in settings")
     with db.connect() as con:
@@ -340,7 +407,7 @@ def get_settings():
 
 
 @app.post("/api/settings")
-def save_settings(body: SettingsBody, _gate: None = Depends(require_access_code)):
+def save_settings(body: SettingsBody):
     for k, v in body.model_dump().items():
         if v.strip():
             db.set_setting(k, v.strip())
@@ -387,7 +454,7 @@ def test_printify():
 
 
 @app.get("/api/export.csv")
-def export_csv(_gate: None = Depends(require_access_code)):
+def export_csv():
     with db.connect() as con:
         rows = con.execute(
             "SELECT id, phrase, filters, status, tags, rating, product_id, created_at "
@@ -405,7 +472,7 @@ def export_csv(_gate: None = Depends(require_access_code)):
 
 
 @app.get("/api/backup")
-def backup(_gate: None = Depends(require_access_code)):
+def backup():
     fd, path = tempfile.mkstemp(suffix=".zip")
     os.close(fd)
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
@@ -432,5 +499,4 @@ def status():
         "printify_ready": bool(
             db.get_setting("printify_api_token") and db.get_setting("printify_shop_id")
         ),
-        "access_code": bool(db.get_setting("access_code")),
     }

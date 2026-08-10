@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 import main  # noqa: E402
 
 client = TestClient(main.app)
+client.cookies.set("auth", main.COOKIE)
 
 
 def _reset():
@@ -25,77 +26,90 @@ def _reset():
         con.execute("DELETE FROM settings")
 
 
-def test_generation_open_when_no_code_set():
-    _reset()
-    r = client.post("/api/test", json={"text": "a red dragon"})
-    assert r.status_code == 200, r.text
+def _anon():
+    """A client with no cookie. Fresh each time: TestClient keeps cookies."""
+    return TestClient(main.app)
 
 
-def test_generation_blocked_without_code_header_when_code_set():
-    _reset()
-    db.set_setting("access_code", "hunter2")
-    r = client.post("/api/test", json={"text": "a red dragon"})
+def test_api_refused_without_cookie():
+    assert _anon().get("/api/designs").status_code == 401
+
+
+def test_non_ascii_cookie_is_refused_not_a_500():
+    # cookie headers are decoded latin-1 by the ASGI server, so a client can hand
+    # us a non-ASCII value; hmac.compare_digest on str requires both sides be
+    # ASCII-only and raises TypeError otherwise - TestClient re-raises that as a
+    # 500 by default, so a broken version of this fails loudly here
+    # bytes, not str: httpx's own header encoder rejects non-ASCII str values
+    # before the request ever leaves this process, so raw bytes are needed to
+    # reach the server the way a real client's raw header bytes would
+    r = _anon().get("/api/designs", headers={"Cookie": b"auth=caf\xe9"})
     assert r.status_code == 401
 
 
-def test_generation_blocked_with_wrong_code():
+def test_dashboard_redirects_to_login_without_cookie():
+    r = _anon().get("/", follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/login"
+
+
+def test_design_images_refused_without_cookie():
+    # the /designs mount was the real hole: a leaked link showed every image
+    r = _anon().get("/designs/anything.png", follow_redirects=False)
+    assert r.status_code == 303
+
+
+def test_login_page_and_its_stylesheet_are_reachable():
+    a = _anon()
+    assert a.get("/login").status_code == 200
+    assert a.get("/static/styles.css").status_code == 200
+
+
+def test_correct_password_sets_cookie_and_opens_the_door():
+    a = _anon()
+    r = a.post("/login", data={"password": "test-password"}, follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/"
+    assert a.cookies.get("auth")
+    assert a.get("/api/designs").status_code == 200
+
+
+def test_wrong_password_sets_no_cookie():
+    a = _anon()
+    r = a.post("/login", data={"password": "nope"}, follow_redirects=False)
+    assert r.status_code == 200
+    assert "Incorrect" in r.text
+    assert not a.cookies.get("auth")
+
+
+def test_login_cookie_is_secure_behind_the_tunnel():
+    # cloudflared terminates TLS and forwards plain http - the cookie must still
+    # come back Secure when that header says the original request was https
+    r = _anon().post(
+        "/login", data={"password": "test-password"},
+        headers={"x-forwarded-proto": "https"}, follow_redirects=False,
+    )
+    assert "Secure" in r.headers["set-cookie"]
+
+
+def test_login_cookie_is_not_secure_on_plain_localhost():
+    r = _anon().post("/login", data={"password": "test-password"}, follow_redirects=False)
+    assert "Secure" not in r.headers["set-cookie"]
+
+
+def test_logout_clears_the_cookie():
+    a = _anon()
+    a.post("/login", data={"password": "test-password"})
+    a.post("/logout", follow_redirects=False)
+    assert a.get("/api/designs").status_code == 401
+
+
+def test_data_exports_need_a_cookie():
     _reset()
-    db.set_setting("access_code", "hunter2")
-    r = client.post("/api/test", json={"text": "a red dragon"},
-                    headers={"X-Access-Code": "nope"})
-    assert r.status_code == 401
-
-
-def test_generation_allowed_with_correct_code():
-    _reset()
-    db.set_setting("access_code", "hunter2")
-    r = client.post("/api/test", json={"text": "a red dragon"},
-                    headers={"X-Access-Code": "hunter2"})
-    assert r.status_code == 200, r.text
-
-
-def test_reading_designs_never_gated():
-    _reset()
-    db.set_setting("access_code", "hunter2")
-    assert client.get("/api/designs").status_code == 200
-    assert client.get("/api/status").status_code == 200
-
-
-def test_settings_open_when_no_code_set():
-    _reset()
-    r = client.post("/api/settings", json={"access_code": "hunter2"})
-    assert r.status_code == 200, r.text
-    assert client.get("/api/status").json()["access_code"] is True
-
-
-def test_settings_gated_once_code_set():
-    _reset()
-    db.set_setting("access_code", "hunter2")
-    # no header -> cannot overwrite the code
-    assert client.post("/api/settings", json={"access_code": "attacker"}).status_code == 401
-    # correct header -> owner can still change settings
-    r = client.post("/api/settings", json={"gemini_api_key": "k"},
-                    headers={"X-Access-Code": "hunter2"})
-    assert r.status_code == 200, r.text
-
-
-DATA_EXPORTS = ["/api/export.csv", "/api/backup"]
-
-
-def test_data_exports_open_when_no_code_set():
-    _reset()
-    for path in DATA_EXPORTS:
-        assert client.get(path).status_code == 200, path
-
-
-def test_data_exports_gated_once_code_set():
-    _reset()
-    db.set_setting("access_code", "hunter2")
-    # the backup zip contains designs.db, which holds the code and Printify token
-    for path in DATA_EXPORTS:
-        assert client.get(path).status_code == 401, f"{path} not gated"
-        r = client.get(path, headers={"X-Access-Code": "hunter2"})
-        assert r.status_code == 200, f"{path}: {r.text}"
+    a = _anon()
+    for path in ("/api/export.csv", "/api/backup"):
+        assert a.get(path).status_code == 401, f"{path} not gated"
+        assert client.get(path).status_code == 200, f"{path}: refused a signed-in client"
 
 
 import worker  # noqa: E402
@@ -116,20 +130,6 @@ def test_queue_cap_allows_below_limit():
         con.execute("INSERT INTO designs (phrase, filters, status) VALUES ('x','','queued')")
     r = client.post("/api/test", json={"text": "still room"})
     assert r.status_code == 200, r.text
-
-
-def test_all_mutating_design_actions_gated_when_code_set():
-    _reset()
-    db.set_setting("access_code", "hunter2")
-    with db.connect() as con:
-        con.execute("INSERT INTO designs (phrase, filters, status) VALUES ('x','','pending')")
-        did = con.execute("SELECT id FROM designs").fetchone()["id"]
-    for action in ["approve", "reject", "retry", "regenerate", "publish", "unreview"]:
-        r = client.post(f"/api/designs/{did}/{action}")
-        assert r.status_code == 401, f"{action} not gated (got {r.status_code})"
-    # DELETE method is also gated
-    r = client.delete(f"/api/designs/{did}")
-    assert r.status_code == 401, f"DELETE not gated (got {r.status_code})"
 
 
 def test_regenerate_respects_queue_cap():

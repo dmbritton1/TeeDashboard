@@ -1,6 +1,8 @@
 """Unit tests for the tunnel-link notifier. No subprocesses, no live Gmail."""
 import smtplib
 
+import pytest
+
 import share
 
 # a real line from cloudflared's startup banner
@@ -122,5 +124,45 @@ def test_relay_never_sends_without_a_url():
     lines = [NOISE, NOISE]
 
     share.relay(lines, sent.append)
+
+    assert sent == []
+
+
+class FakeProcess:
+    """Stands in for subprocess.Popen's return value."""
+
+    def __init__(self, poll_value=None, stdout=None):
+        self._poll_value = poll_value
+        self.stdout = stdout or []
+
+    def poll(self):
+        return self._poll_value
+
+    def terminate(self):
+        pass
+
+
+def test_main_checks_the_password_before_spawning_anything(monkeypatch):
+    monkeypatch.delenv("DASHBOARD_PASSWORD", raising=False)
+
+    def boom(*a, **k):
+        raise AssertionError("subprocess.Popen should not run without a password")
+
+    monkeypatch.setattr(share.subprocess, "Popen", boom)
+
+    with pytest.raises(SystemExit, match="DASHBOARD_PASSWORD"):
+        share.main()
+
+
+def test_main_skips_the_email_when_the_server_already_exited(monkeypatch):
+    # password is set, but the server process reports itself already dead
+    # (e.g. it crashed on startup) - the tunnel URL it fronts is worthless
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "whatever")
+    procs = [FakeProcess(poll_value=1), FakeProcess(stdout=[BANNER])]
+    monkeypatch.setattr(share.subprocess, "Popen", lambda *a, **k: procs.pop(0))
+    sent = []
+    monkeypatch.setattr(share, "send_link", sent.append)
+
+    share.main()
 
     assert sent == []
