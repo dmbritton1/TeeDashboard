@@ -127,7 +127,9 @@ operator and their own dashboard.
   against the POST body captured from the existing mocked-requests harness, so
   the two cannot drift without a red test.
 - `tee_colors` parsing: whitespace, empty, and unknown-colour fallback.
-- `GET /api/designs/{id}/listing` on a non-approved design and a missing design.
+- `GET /api/designs/{id}/listing` returns the boilerplate-joined description,
+  and 404s on a missing design. Deliberately open to any status, so a pending
+  design can be previewed before it is approved.
 - `printify_ready` reflects the stored check, and a 401 on publish clears it.
 - Front end verified in the browser: counter accuracy at the 140/13/20
   boundaries, and that a field being typed in survives the three-second poll.
