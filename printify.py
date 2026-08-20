@@ -69,6 +69,28 @@ def _description(design: dict) -> str:
     return "\n\n".join(parts) if parts else design["phrase"]
 
 
+def listing_fields(design: dict) -> dict:
+    """Everything about a listing that is decided before we talk to Printify.
+
+    Both the publish payload and the preview endpoint read this, so the
+    operator cannot be shown a listing that differs from the one that ships.
+    Deliberately excludes blueprint and print provider: those need the network,
+    and _blueprint() raises for a product with none configured, which would
+    turn a preview of an unconfigured poster into a 500.
+    """
+    product = design.get("product") or pipeline.DEFAULT_PRODUCT
+    data = pipeline.product_data(product)
+    return {
+        "title": design.get("listing_title")
+                 or design["phrase"].title() + " " + data["title_suffix"],
+        "description": _description(design),
+        "tags": listing.clean_tags(design.get("listing_tags") or ""),
+        "price_cents": data["price_cents"],
+        "colors": sorted(COLORS) if product == "tee" else [],
+        "product_label": data["label"],
+    }
+
+
 def publish(design: dict) -> str:
     shop_id = db.get_setting("printify_shop_id")
     product = design.get("product") or pipeline.DEFAULT_PRODUCT
@@ -94,13 +116,13 @@ def publish(design: dict) -> str:
     )["variants"]
     variants = _select_variants(product, all_variants)
 
+    fields = listing_fields(design)
     product_json = _post(
         "/shops/%s/products.json" % shop_id,
         {
-            "title": design.get("listing_title")
-                     or design["phrase"].title() + " " + data["title_suffix"],
-            "description": _description(design),
-            "tags": listing.clean_tags(design.get("listing_tags") or ""),
+            "title": fields["title"],
+            "description": fields["description"],
+            "tags": fields["tags"],
             "blueprint_id": blueprint_id,
             "print_provider_id": pp_id,
             "variants": [

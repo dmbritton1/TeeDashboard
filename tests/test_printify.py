@@ -181,3 +181,62 @@ def test_description_uses_whichever_half_exists(tmp_path, monkeypatch):
 def test_description_falls_back_to_the_phrase_when_both_are_empty(tmp_path, monkeypatch):
     setup_tmp(tmp_path, monkeypatch)
     assert printify._description({"phrase": "dog dad", "listing_hook": None}) == "dog dad"
+
+
+def test_listing_fields_prefers_the_generated_title(tmp_path, monkeypatch):
+    setup_tmp(tmp_path, monkeypatch)
+    fields = printify.listing_fields(
+        {"phrase": "dog dad", "product": "tee", "listing_title": "Dog Dad Tee, Funny Gift"}
+    )
+    assert fields["title"] == "Dog Dad Tee, Funny Gift"
+
+
+def test_listing_fields_falls_back_to_the_old_title(tmp_path, monkeypatch):
+    setup_tmp(tmp_path, monkeypatch)
+    fields = printify.listing_fields({"phrase": "dog dad", "product": "tee"})
+    assert fields["title"] == "Dog Dad T-Shirt"
+
+
+def test_listing_fields_cleans_tags(tmp_path, monkeypatch):
+    setup_tmp(tmp_path, monkeypatch)
+    fields = printify.listing_fields(
+        {"phrase": "p", "product": "tee", "listing_tags": "A, a, %s" % ("x" * 21)}
+    )
+    assert fields["tags"] == ["a"]
+
+
+def test_listing_fields_does_not_raise_without_a_blueprint(tmp_path, monkeypatch):
+    # a poster has no blueprint configured on this account; the preview must
+    # still render rather than 500
+    setup_tmp(tmp_path, monkeypatch)
+    fields = printify.listing_fields({"phrase": "p", "product": "poster"})
+    assert fields["product_label"] == "Poster (50x70cm)"
+    assert fields["price_cents"] == 3499
+
+
+def test_publish_sends_exactly_listing_fields(tmp_path, monkeypatch):
+    """The anti-drift test: whatever listing_fields says is what Printify gets."""
+    setup_tmp(tmp_path, monkeypatch)
+    sent = {}
+
+    def fake_post(path, payload, timeout=60):
+        if path.endswith("/products.json"):
+            sent.update(payload)
+            return {"id": "prod1"}
+        return {"id": "img1"}
+
+    monkeypatch.setattr(printify, "_post", fake_post)
+    monkeypatch.setattr(printify, "_get", lambda path: (
+        [{"id": 7}] if "print_providers.json" in path else {"variants": TEE_VARIANTS}))
+    png = tmp_path / "d.png"
+    png.write_bytes(b"x")
+    design = {"id": 1, "phrase": "dog dad", "product": "tee", "file": str(png),
+              "listing_title": "Dog Dad Tee", "listing_tags": "dog dad, funny",
+              "listing_hook": "A hook."}
+
+    printify.publish(design)
+
+    fields = printify.listing_fields(design)
+    assert sent["title"] == fields["title"]
+    assert sent["description"] == fields["description"]
+    assert sent["tags"] == fields["tags"]
