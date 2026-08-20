@@ -213,17 +213,6 @@ label { font-size: 13px; color: var(--stone); min-width: 108px; }
 .card .prompt { font-family: var(--mono); font-size: 10.5px; color: var(--vein-grey); margin-top: 6px; line-height: 1.5; }
 .card .prompt summary { cursor: pointer; color: var(--stone); }
 .card .prompt.none { font-style: italic; }
-/* Listing copy box: the global textarea (96px, meant for the settings panel)
-   would add ~350px to a review card three times over. Scoped down to match
-   the card's own type scale instead. */
-.card .listing textarea {
-  height: auto; min-height: 40px; font-size: 11px; padding: 8px 10px; margin-bottom: 8px;
-}
-.card .listing label {
-  display: block; min-width: 0; font-size: 10px; letter-spacing: 0.1em;
-  text-transform: uppercase; color: var(--gold-soft); margin: 8px 0 4px;
-}
-.card .listing label:first-of-type { margin-top: 10px; }
 .card .error { font-size: 12px; color: var(--clay); margin-top: 6px; }
 .card .actions { display: flex; gap: 6px; padding: 13px 16px 16px; flex-wrap: wrap; align-items: center; }
 .card .actions button { padding: 7px 13px; font-size: 10.5px; }
@@ -278,6 +267,13 @@ select, input[type=date] {
 #lightbox_inner h3 { font-family: "Italiana", serif; font-size: 24px; font-weight: 400; margin: 0 0 8px; letter-spacing: 0.04em; }
 .lb-row { margin: 10px 0; font-size: 12.5px; color: var(--stone); }
 .lb-row input { width: 100%; }
+/* --muted is not in this palette; --stone is its equivalent. */
+.preview label { display:block; margin:10px 0 4px; font:12px var(--mono); color:var(--muted, var(--stone)); }
+.preview textarea { width:100%; }
+.preview .count { float:right; }
+.preview .count.over { color:var(--clay); }
+.preview .chips { display:flex; flex-wrap:wrap; gap:4px; margin-bottom:6px; }
+.preview .desc { white-space:pre-wrap; }
 @media (max-width: 700px) { #lightbox_inner { grid-template-columns: 1fr; } }
 
 #bulkbar { display: flex; gap: 10px; align-items: center; margin: 0 0 14px; }

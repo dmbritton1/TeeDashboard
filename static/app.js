@@ -456,31 +456,6 @@ function creepTick() {
 }
 setInterval(creepTick, 120);
 
-// Approved designs carry their Etsy copy here. Collapsed by default so the
-// review grid stays a grid; the fields save on blur through the same PATCH
-// route that already handles tags and rating.
-function listingBox(d) {
-  // Published designs are out of scope for editing (spec's non-goal is
-  // rewriting copy for an already-published listing), so the box only ever
-  // shows for "approved" - once published it just disappears.
-  if (d.status !== "approved") return "";
-  const waiting = !d.listing_title && !d.listing_hook && !d.listing_tags;
-  if (waiting && !d.error) {
-    // Only designs whose listing.write job is still plausibly in flight get
-    // the "writing…" placeholder. A design approved before this feature
-    // existed (or long enough ago that the one Gemma call would have
-    // finished or errored by now) has no job coming - say nothing rather
-    // than promise a copy that will never arrive.
-    const inFlight = d.reviewed_at &&
-      (Date.now() - new Date(d.reviewed_at + "Z")) < 3 * 60 * 1000;
-    return inFlight ? `<div class="prompt none">writing listing copy…</div>` : "";
-  }
-  return `<details class="prompt listing"><summary>listing copy</summary>` +
-    `<label>Title</label><textarea data-f="listing_title" data-id="${d.id}" rows="2">${esc(d.listing_title || "")}</textarea>` +
-    `<label>Tags (max 13, 20 chars each - longer ones are dropped)</label><textarea data-f="listing_tags" data-id="${d.id}" rows="2">${esc(d.listing_tags || "")}</textarea>` +
-    `<label>Hook</label><textarea data-f="listing_hook" data-id="${d.id}" rows="4">${esc(d.listing_hook || "")}</textarea>` +
-    `</details>`;
-}
 function card(d) {
 
   const generating = d.status === "queued" || d.status === "generating";
@@ -496,7 +471,11 @@ function card(d) {
     : `<div class="placeholder ${generating ? "working" : ""}" title="${eta ? "about " + eta + " min on this GPU" : ""}">${working}</div>`;
   const buttons = {
     pending: `<button class="gilt" onclick="act(this,${d.id},'approve')">✓ Approve</button><button onclick="act(this,${d.id},'reject')">✕ Reject</button><button onclick="act(this,${d.id},'regenerate')">↻ Regenerate</button>`,
-    approved: (stat.printify_ready
+    approved:
+      (d.listing_title || d.listing_hook
+        ? `<button onclick="openPreview(${d.id})">👁 Preview listing</button>`
+        : `<button disabled>writing copy…</button>`) +
+      (stat.printify_ready
         ? `<button class="gilt" onclick="act(this,${d.id},'publish')">Publish to Printify</button>`
         : `<button disabled>Publish to Printify</button><span class="tag">Printify not configured</span>`) +
       (d.print_file ? '<span class="tag ok">print-ready ✓</span>' : '<span class="tag">upscaling…</span>'),
@@ -507,7 +486,6 @@ function card(d) {
   return `<div class="card${selected.has(d.id) ? " selected" : ""}" data-id="${d.id}" data-product="${d.product || "tee"}"><div class="frame">${pick}${img}</div><div class="body"><div class="phrase">${esc(d.phrase)}</div>` +
     `<div class="filters">${esc(d.filters)}</div>` +
     promptLine(d) +
-    listingBox(d) +
     (d.error ? `<div class="error">${esc(d.error)}</div>` : "") +
     `</div><div class="actions">${buttons}</div></div>`;
 }
@@ -752,8 +730,11 @@ function renderTest() {
 }
 
 let lbId = null;
-function openLightbox(id) { lbId = id; renderLightbox(); }
-function closeLightbox() { lbId = null; document.getElementById("lightbox").hidden = true; }
+function openLightbox(id) { lbId = id; lbMode = "image"; renderLightbox(); }
+function closeLightbox() {
+  lbId = null; lbMode = "image";
+  document.getElementById("lightbox").hidden = true;
+}
 function findDesign(id) {
   return designs.find(x => x.id === id) || testDesigns.find(x => x.id === id);
 }
@@ -774,6 +755,41 @@ async function saveTags(id) {
     flash("Tags saved");
     renderLibrary();
   } catch (e) { alert(e.message); }
+}
+// The preview reuses the lightbox shell but not its arrow-key navigation:
+// stepping to the next design out from under a half-typed title would lose it.
+let lbMode = "image";
+function openPreview(id) { lbId = id; lbMode = "listing"; renderPreview(); }
+
+async function renderPreview() {
+  const d = findDesign(lbId);
+  if (!d) { closeLightbox(); return; }
+  let f;
+  try {
+    f = await api(`/api/designs/${d.id}/listing`);
+  } catch (e) { flash("Couldn't load the listing — " + e.message); return; }
+  // The operator can close the lightbox or preview a different design while
+  // this fetch is in flight; a late reply must not reopen a closed lightbox or
+  // paint the wrong listing over the current one.
+  if (lbId !== d.id || lbMode !== "listing") return;
+  const tags = f.tags.map(t => `<span class="tag">${esc(t)}</span>`).join(" ");
+  const price = "$" + (f.price_cents / 100).toFixed(2);
+  document.getElementById("lightbox_inner").innerHTML =
+    `<div>${d.file ? `<img src="/${d.file}" alt="${esc(d.phrase)}">` : `<div class="placeholder">no image</div>`}</div>` +
+    `<div class="preview"><h3>Listing preview</h3>` +
+    `<div class="lb-row">${esc(f.product_label)} · ${price}` +
+      (f.colors.length ? ` · ${f.colors.length} colours` : "") + `</div>` +
+    `<label>Title <span class="count ${f.title.length > 140 ? "over" : ""}">${f.title.length}/140</span></label>` +
+    `<textarea data-f="listing_title" data-id="${d.id}" rows="3">${esc(f.title)}</textarea>` +
+    `<label>Tags <span class="count">${f.tags.length}/13</span></label>` +
+    `<div class="chips">${tags || "<em>none yet</em>"}</div>` +
+    `<textarea data-f="listing_tags" data-id="${d.id}" rows="2">${esc(f.tags.join(", "))}</textarea>` +
+    `<label>Description <span class="hint">hook plus your boilerplate, as Printify receives it</span></label>` +
+    `<div class="lb-row desc">${esc(f.description)}</div>` +
+    `<label>Hook (editable)</label>` +
+    `<textarea data-f="listing_hook" data-id="${d.id}" rows="4">${esc(d.listing_hook || "")}</textarea>` +
+    `<div class="lb-row"><button onclick="closeLightbox()">Close</button></div></div>`;
+  document.getElementById("lightbox").hidden = false;
 }
 function renderLightbox() {
   const d = findDesign(lbId);
@@ -817,6 +833,7 @@ function renderLightbox() {
 document.addEventListener("keydown", (ev) => {
   if (lbId === null) return;
   if (ev.key === "Escape") closeLightbox();
+  if (lbMode === "listing") return;
   if (ev.key === "ArrowRight") lbMove(1);
   if (ev.key === "ArrowLeft") lbMove(-1);
 });
@@ -970,7 +987,14 @@ document.addEventListener("blur", async e => {
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({[t.dataset.f]: t.value}),
     });
+    // refresh() is async (and no-ops while a poll is already in flight), so the
+    // cached row is still the pre-edit one when renderPreview runs. The hook
+    // box reads from that cache, and without this it repaints the operator's
+    // just-typed hook back to the old text. Same trick as saveTags above.
+    const cached = findDesign(Number(t.dataset.id));
+    if (cached) cached[t.dataset.f] = t.value;
     refresh();
+    if (lbMode === "listing") renderPreview();
   } catch (err) { flash("Couldn't save the listing copy — " + err.message); }
 }, true);
 async function copyPrompt() {
