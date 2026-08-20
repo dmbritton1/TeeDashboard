@@ -301,6 +301,66 @@ def test_verify_stores_failure_on_a_dead_token(tmp_path, monkeypatch):
     assert "Unauthorized" in msg
 
 
+def test_verify_records_nothing_when_the_network_fails(tmp_path, monkeypatch):
+    """A connection failure says nothing about the token - only Printify's own
+    answer may set the flag. Without this, a dropped wifi would grey out Publish
+    and read as 'your token is dead'."""
+    load_main(tmp_path, monkeypatch)   # for its DB_PATH monkeypatch
+    db.set_setting("printify_api_token", "tok")
+    db.set_setting("printify_shop_id", "99")
+
+    def boom(*a, **k):
+        raise printify.requests.ConnectionError("no route to host")
+
+    monkeypatch.setattr(printify.requests, "get", boom)
+    ok, msg = printify.verify()
+    assert not ok and "no route to host" in msg
+    assert db.get_setting("printify_verified") is None
+
+
+def _raises(err):
+    def publish(row):
+        raise err
+    return publish
+
+
+def _approved_for_publish(tmp_path):
+    """An approved row that clears every publish() guard, so a test reaches the
+    printify.publish call itself."""
+    db.set_setting("printify_api_token", "t")
+    db.set_setting("printify_shop_id", "s")
+    pf = tmp_path / "designs" / "9-print.png"
+    pf.parent.mkdir(exist_ok=True)
+    pf.write_bytes(b"png")
+    return insert("approved", file="designs/9-print.png", print_file="designs/9-print.png")
+
+
+def test_publish_clears_the_verified_flag_on_a_401(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    did = _approved_for_publish(tmp_path)
+    db.set_setting("printify_verified", "1")
+    err = printify.requests.HTTPError("401 Client Error", response=FakeResp(401))
+    monkeypatch.setattr(main.printify, "publish", _raises(err))
+    with pytest.raises(HTTPException):
+        main.publish(did)
+    assert db.get_setting("printify_verified") == "0"
+
+
+def test_publish_keeps_the_verified_flag_on_a_non_401(tmp_path, monkeypatch):
+    """A 404 on a URL that happens to contain 401 - a blueprint or shop ID -
+    must not demote a working token."""
+    main = load_main(tmp_path, monkeypatch)
+    did = _approved_for_publish(tmp_path)
+    db.set_setting("printify_verified", "1")
+    err = printify.requests.HTTPError(
+        "404 Client Error for url: https://api.printify.com/v1/catalog/blueprints/401.json",
+        response=FakeResp(404))
+    monkeypatch.setattr(main.printify, "publish", _raises(err))
+    with pytest.raises(HTTPException):
+        main.publish(did)
+    assert db.get_setting("printify_verified") == "1"
+
+
 def test_status_is_not_ready_until_verified(tmp_path, monkeypatch):
     main = load_main(tmp_path, monkeypatch)
     db.set_setting("printify_api_token", "tok")

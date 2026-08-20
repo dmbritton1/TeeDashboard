@@ -340,7 +340,11 @@ def publish(design_id: int, _gate: None = Depends(require_access_code)):
         msg = ("publish failed: %s" % e)[:500]
         with db.connect() as con:
             con.execute("UPDATE designs SET error = ? WHERE id = ?", (msg, design_id))
-        if "401" in str(e):
+        # the status code off the response object, not "401" in the message:
+        # raise_for_status embeds the URL, so any error on a URL holding a 401
+        # (a shop or blueprint ID) would wrongly demote the token and grey out
+        # Publish until the next restart
+        if getattr(e, "response", None) is not None and e.response.status_code == 401:
             db.set_setting("printify_verified", "0")
         raise HTTPException(502, "Printify error: %s" % e)
     with db.connect() as con:

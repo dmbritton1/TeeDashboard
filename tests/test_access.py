@@ -2,6 +2,7 @@ import os
 import tempfile
 
 import db
+import printify
 import worker
 
 # point the app at a throwaway DB before main's import-time db.init() runs
@@ -11,10 +12,20 @@ db.DB_PATH = os.path.join(tempfile.mkdtemp(), "api.db")
 # picks up and tries to render - loading the whole image model into RAM and
 # getting the test process OOM-killed.
 worker.start = lambda: None
+# ...and stop main's import-time printify.verify() thread from making a real
+# call to Printify: db.get_setting falls back to os.environ, so a machine with
+# PRINTIFY_API_TOKEN set satisfies verify()'s guard even against this empty DB.
+# The thread binds its target at construction, so stubbing across main's import
+# is enough - and it is put back below, because this rebinding is process-wide
+# and pytest imports every test module into one process.
+_real_verify = printify.verify
+printify.verify = lambda: (False, "")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
 import main  # noqa: E402
+
+printify.verify = _real_verify
 
 client = TestClient(main.app)
 
