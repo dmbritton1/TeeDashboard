@@ -101,6 +101,19 @@ def listing_fields(design: dict) -> dict:
     }
 
 
+def _provider_id(providers: list) -> int:
+    """The configured print provider, or the first one. Providers differ in
+    both price and mockup library, so which one you get should not be an
+    accident of catalogue ordering - but an unknown id falls back rather than
+    raising, same habit as _select_variants."""
+    want = db.get_setting("printify_print_provider_id")
+    if want:
+        for p in providers:
+            if str(p["id"]) == str(want):
+                return int(p["id"])
+    return providers[0]["id"]
+
+
 def publish(design: dict) -> str:
     shop_id = db.get_setting("printify_shop_id")
     product = design.get("product") or pipeline.DEFAULT_PRODUCT
@@ -119,7 +132,7 @@ def publish(design: dict) -> str:
     providers = _get("/catalog/blueprints/%d/print_providers.json" % blueprint_id)
     if not providers:
         raise RuntimeError("No print providers for blueprint %d" % blueprint_id)
-    pp_id = providers[0]["id"]
+    pp_id = _provider_id(providers)
 
     all_variants = _get(
         "/catalog/blueprints/%d/print_providers/%d/variants.json" % (blueprint_id, pp_id)

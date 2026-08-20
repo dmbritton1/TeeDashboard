@@ -276,3 +276,24 @@ def test_publish_sends_exactly_listing_fields(tmp_path, monkeypatch):
     assert sent["title"] == fields["title"]
     assert sent["description"] == fields["description"]
     assert sent["tags"] == fields["tags"]
+
+
+PROVIDERS = [{"id": 3, "title": "First"}, {"id": 9, "title": "Second"}]
+
+
+def test_provider_defaults_to_the_first(tmp_path, monkeypatch):
+    setup_tmp(tmp_path, monkeypatch)
+    assert printify._provider_id(PROVIDERS) == 3
+
+
+def test_provider_honours_the_setting(tmp_path, monkeypatch):
+    setup_tmp(tmp_path, monkeypatch)
+    db.set_setting("printify_print_provider_id", "9")
+    assert printify._provider_id(PROVIDERS) == 9
+
+
+def test_unknown_provider_setting_falls_back_rather_than_failing(tmp_path, monkeypatch):
+    # same habit as _select_variants: publish narrow, never publish nothing
+    setup_tmp(tmp_path, monkeypatch)
+    db.set_setting("printify_print_provider_id", "404")
+    assert printify._provider_id(PROVIDERS) == 3
