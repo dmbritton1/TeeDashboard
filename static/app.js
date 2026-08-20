@@ -469,12 +469,20 @@ function card(d) {
   const img = d.file
     ? `<img src="/${d.file}" loading="lazy" alt="${esc(d.phrase)}">`
     : `<div class="placeholder ${generating ? "working" : ""}" title="${eta ? "about " + eta + " min on this GPU" : ""}">${working}</div>`;
+  // Only a design whose listing.write job is still plausibly in flight gets the
+  // disabled placeholder: reviewed inside three minutes, nothing written yet,
+  // and no error. Everything else opens the preview, which is now the only
+  // route to this copy - a design whose Gemma call failed, or one approved
+  // before the feature existed, must still be viewable and editable.
+  const noCopy = !d.listing_title && !d.listing_tags && !d.listing_hook;
+  const writing = noCopy && !d.error && d.reviewed_at &&
+    Date.now() - new Date(d.reviewed_at + "Z") < 3 * 60 * 1000;
   const buttons = {
     pending: `<button class="gilt" onclick="act(this,${d.id},'approve')">✓ Approve</button><button onclick="act(this,${d.id},'reject')">✕ Reject</button><button onclick="act(this,${d.id},'regenerate')">↻ Regenerate</button>`,
     approved:
-      (d.listing_title || d.listing_hook
-        ? `<button onclick="openPreview(${d.id})">👁 Preview listing</button>`
-        : `<button disabled>writing copy…</button>`) +
+      (writing
+        ? `<button disabled>writing copy…</button>`
+        : `<button onclick="openPreview(${d.id})">👁 Preview listing</button>`) +
       (stat.printify_ready
         ? `<button class="gilt" onclick="act(this,${d.id},'publish')">Publish to Printify</button>`
         : `<button disabled>Publish to Printify</button><span class="tag">Printify not configured</span>`) +
@@ -767,11 +775,28 @@ async function renderPreview() {
   let f;
   try {
     f = await api(`/api/designs/${d.id}/listing`);
-  } catch (e) { flash("Couldn't load the listing — " + e.message); return; }
+  } catch (e) {
+    // Leaving lbId set with nothing on screen would silently kill the grid's
+    // arrow keys, which bail while a lightbox is "open".
+    closeLightbox();
+    flash("Couldn't load the listing — " + e.message);
+    return;
+  }
   // The operator can close the lightbox or preview a different design while
   // this fetch is in flight; a late reply must not reopen a closed lightbox or
   // paint the wrong listing over the current one.
   if (lbId !== d.id || lbMode !== "listing") return;
+  // Never repaint a field being typed in. PR #1 guards cards this way in
+  // syncChildren, but syncChildren never touches #lightbox_inner - here the
+  // re-render itself is what would drop the element under the cursor.
+  const shell = document.getElementById("lightbox_inner");
+  if (shell.contains(document.activeElement)) return;
+  // main.py's clamp_title silently cuts an over-long title back to the last
+  // comma, so say so. The box still holds what was typed until we repaint it.
+  const typed = shell.querySelector('textarea[data-f="listing_title"]');
+  if (typed && typed.value !== f.title) {
+    flash(`Title shortened to ${f.title.length} characters to fit Etsy's 140`);
+  }
   const tags = f.tags.map(t => `<span class="tag">${esc(t)}</span>`).join(" ");
   const price = "$" + (f.price_cents / 100).toFixed(2);
   document.getElementById("lightbox_inner").innerHTML =
@@ -779,7 +804,7 @@ async function renderPreview() {
     `<div class="preview"><h3>Listing preview</h3>` +
     `<div class="lb-row">${esc(f.product_label)} · ${price}` +
       (f.colors.length ? ` · ${f.colors.length} colours` : "") + `</div>` +
-    `<label>Title <span class="count ${f.title.length > 140 ? "over" : ""}">${f.title.length}/140</span></label>` +
+    `<label>Title <span class="count ${f.title.length > 140 ? "over" : ""}" id="title_count">${f.title.length}/140</span></label>` +
     `<textarea data-f="listing_title" data-id="${d.id}" rows="3">${esc(f.title)}</textarea>` +
     `<label>Tags <span class="count">${f.tags.length}/13</span></label>` +
     `<div class="chips">${tags || "<em>none yet</em>"}</div>` +
@@ -997,6 +1022,16 @@ document.addEventListener("blur", async e => {
     if (lbMode === "listing") renderPreview();
   } catch (err) { flash("Couldn't save the listing copy — " + err.message); }
 }, true);
+// The counter has to move while they type - on blur is exactly when it stops
+// being useful. Paint only; the blur handler above still owns saving.
+document.addEventListener("input", e => {
+  const t = e.target;
+  if (!t.dataset || t.dataset.f !== "listing_title") return;
+  const c = document.getElementById("title_count");
+  if (!c) return;
+  c.textContent = `${t.value.length}/140`;
+  c.classList.toggle("over", t.value.length > 140);
+});
 async function copyPrompt() {
   const el = document.getElementById("prompt_box");
   try { await navigator.clipboard.writeText(el.value); flash("Prompt copied"); }
