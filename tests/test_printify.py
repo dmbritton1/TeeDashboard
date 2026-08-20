@@ -27,23 +27,59 @@ POSTER_VARIANTS = [
 
 
 def test_tee_variants_are_filtered_to_the_stocked_colours():
-    assert [v["id"] for v in printify._select_variants("tee", TEE_VARIANTS)] == [1, 3]
+    assert [v["id"] for v in printify._select_variants(
+        "tee", TEE_VARIANTS, ["Black", "White"])] == [1, 3]
 
 
 def test_poster_variants_are_filtered_to_the_50x70():
-    assert [v["id"] for v in printify._select_variants("poster", POSTER_VARIANTS)] == [11]
+    assert [v["id"] for v in printify._select_variants("poster", POSTER_VARIANTS, [])] == [11]
 
 
 def test_poster_variant_match_survives_spacing():
     spaced = [{"id": 20, "options": {"size": "50 x 70 cm"}}]
-    assert [v["id"] for v in printify._select_variants("poster", spaced)] == [20]
+    assert [v["id"] for v in printify._select_variants("poster", spaced, [])] == [20]
 
 
 def test_unrecognised_catalogue_falls_back_rather_than_publishing_nothing():
     # better narrow than not at all - the same habit the tee path already had
     odd = [{"id": 30, "options": {"size": "A2"}}, {"id": 31, "options": {"size": "A1"}}]
-    assert [v["id"] for v in printify._select_variants("poster", odd)] == [30, 31]
-    assert printify._select_variants("tee", [{"id": 40, "options": {"color": "Lime"}}]) == [{"id": 40, "options": {"color": "Lime"}}]
+    assert [v["id"] for v in printify._select_variants("poster", odd, [])] == [30, 31]
+    assert printify._select_variants(
+        "tee", [{"id": 40, "options": {"color": "Lime"}}], ["Black", "White"]
+    ) == [{"id": 40, "options": {"color": "Lime"}}]
+
+
+def test_tee_colors_default_when_unset(tmp_path, monkeypatch):
+    setup_tmp(tmp_path, monkeypatch)
+    assert printify.tee_colors() == list(printify.DEFAULT_TEE_COLORS)
+
+
+def test_tee_colors_parse_and_strip(tmp_path, monkeypatch):
+    setup_tmp(tmp_path, monkeypatch)
+    db.set_setting("tee_colors", " Black , , Navy ")
+    assert printify.tee_colors() == ["Black", "Navy"]
+
+
+def test_blank_tee_colors_setting_falls_back(tmp_path, monkeypatch):
+    setup_tmp(tmp_path, monkeypatch)
+    db.set_setting("tee_colors", "   ,  ")
+    assert printify.tee_colors() == list(printify.DEFAULT_TEE_COLORS)
+
+
+def test_select_variants_uses_the_colours_passed_in():
+    picked = printify._select_variants("tee", TEE_VARIANTS, ["Neon Pink"])
+    assert [v["id"] for v in picked] == [2]
+
+
+def test_listing_fields_reports_the_configured_colours(tmp_path, monkeypatch):
+    setup_tmp(tmp_path, monkeypatch)
+    db.set_setting("tee_colors", "Black, Navy")
+    assert printify.listing_fields({"phrase": "p", "product": "tee"})["colors"] == ["Black", "Navy"]
+
+
+def test_listing_fields_has_no_colours_for_a_poster(tmp_path, monkeypatch):
+    setup_tmp(tmp_path, monkeypatch)
+    assert printify.listing_fields({"phrase": "p", "product": "poster"})["colors"] == []
 
 
 def test_tee_blueprint_defaults_to_the_gildan_when_unset(tmp_path, monkeypatch):

@@ -8,7 +8,9 @@ import listing
 import pipeline
 
 API = "https://api.printify.com/v1"
-COLORS = {"Black", "White"}
+# Printify renders mockups per enabled colour, so a narrow list is a direct
+# cause of a thin mockup set on the listing.
+DEFAULT_TEE_COLORS = ("Black", "White", "Navy", "Sport Grey", "Sand")
 # The 50x70cm variant's real name is unverified: this account's token 401s on the
 # poster catalogue, so these are plausible spellings rather than a fact. Once a
 # token with shop scope exists, correct this tuple - it is the only place to look.
@@ -43,7 +45,15 @@ def _blueprint(data: dict) -> int:
     return int(raw)
 
 
-def _select_variants(product: str, variants: list) -> list:
+def tee_colors() -> list[str]:
+    """Colours to enable on a tee. Names must match the print provider's
+    catalogue exactly; anything it doesn't recognise hits _select_variants'
+    existing fallback rather than publishing nothing."""
+    raw = db.get_setting("tee_colors") or ""
+    return [c.strip() for c in raw.split(",") if c.strip()] or list(DEFAULT_TEE_COLORS)
+
+
+def _select_variants(product: str, variants: list, colors: list) -> list:
     """The sellable variants for this product. Both paths keep the existing
     'or the first ten' fallback: against an unfamiliar catalogue, publishing
     narrow beats publishing nothing."""
@@ -54,7 +64,7 @@ def _select_variants(product: str, variants: list) -> list:
             if hit:
                 return hit
         return variants[:10]
-    return [v for v in variants if v["options"].get("color") in COLORS] or variants[:10]
+    return [v for v in variants if v["options"].get("color") in set(colors)] or variants[:10]
 
 
 def _description(design: dict) -> str:
@@ -86,7 +96,7 @@ def listing_fields(design: dict) -> dict:
         "description": _description(design),
         "tags": listing.clean_tags(design.get("listing_tags") or ""),
         "price_cents": data["price_cents"],
-        "colors": sorted(COLORS) if product == "tee" else [],
+        "colors": tee_colors() if product == "tee" else [],
         "product_label": data["label"],
     }
 
@@ -114,7 +124,7 @@ def publish(design: dict) -> str:
     all_variants = _get(
         "/catalog/blueprints/%d/print_providers/%d/variants.json" % (blueprint_id, pp_id)
     )["variants"]
-    variants = _select_variants(product, all_variants)
+    variants = _select_variants(product, all_variants, tee_colors())
 
     fields = listing_fields(design)
     product_json = _post(
