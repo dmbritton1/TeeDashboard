@@ -23,9 +23,13 @@ printify.verify = lambda: (False, "")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-import main  # noqa: E402
-
-printify.verify = _real_verify
+try:
+    import main  # noqa: E402
+finally:
+    # in a finally so a failed import cannot leave the stub installed for the
+    # rest of the process - a later module calling printify.verify() would get
+    # (False, "") and fail confusingly, hiding the real import error
+    printify.verify = _real_verify
 
 client = TestClient(main.app)
 
