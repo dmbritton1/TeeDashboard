@@ -55,8 +55,10 @@ printify.listing_fields(design) -> dict
 ```
 
 returning exactly what gets sent: `title`, `description`, `tags`, `price_cents`,
-`colors`, `blueprint_id`, `blueprint_label`. `publish()` calls it; a new
-read-only endpoint
+`colors`, `product_label`. Blueprint and print-provider resolution stay in
+`publish()`, because both need the network and `_blueprint()` raises when a
+product has none configured — a preview must not 500 on an unconfigured poster.
+`publish()` calls it; a new read-only endpoint
 
 ```
 GET /api/designs/{id}/listing
@@ -79,7 +81,7 @@ lightbox. Left: the artwork. Right: the listing.
   enforces lower-casing, de-duplication and the 20-character drop; the counter
   reflects what survives, not what was typed.
 - Description: hook and boilerplate already joined, as Printify receives it.
-- Price, colours, blueprint name — read-only context.
+- Price, colours, product name — read-only context.
 
 Fields save on blur through PR #1's existing delegated PATCH handler. No new
 save path, and `syncChildren`'s focus guard already protects a field being
