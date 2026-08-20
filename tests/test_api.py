@@ -507,3 +507,28 @@ def test_patch_can_clear_a_listing_field(tmp_path, monkeypatch):
     main.patch_design(did, main.PatchBody(listing_hook="something"))
     main.patch_design(did, main.PatchBody(listing_hook=""))
     assert _read(did)["listing_hook"] == ""
+
+
+def test_listing_endpoint_returns_the_publish_payload(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    did = insert("approved", listing_title="Dog Dad Tee", listing_tags="dog dad, funny",
+                 listing_hook="A hook.")
+    out = main.design_listing(did)
+    assert out["title"] == "Dog Dad Tee"
+    assert out["tags"] == ["dog dad", "funny"]
+    assert "A hook." in out["description"]
+    assert out["price_cents"] == 2499
+
+
+def test_listing_endpoint_includes_the_boilerplate(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    db.set_setting("listing_boilerplate", "Printed on demand.")
+    did = insert("approved", listing_hook="A hook.")
+    assert main.design_listing(did)["description"] == "A hook.\n\nPrinted on demand."
+
+
+def test_listing_endpoint_404s_on_a_missing_design(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    with pytest.raises(HTTPException) as e:
+        main.design_listing(9999)
+    assert e.value.status_code == 404

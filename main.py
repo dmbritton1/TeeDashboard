@@ -214,6 +214,17 @@ def patch_design(design_id: int, body: PatchBody, _gate: None = Depends(require_
     return {"ok": True}
 
 
+@app.get("/api/designs/{design_id}/listing")
+def design_listing(design_id: int):
+    """The listing exactly as publish would send it. Read-only, and the same
+    function publish uses, so the preview cannot show something else."""
+    with db.connect() as con:
+        row = con.execute("SELECT * FROM designs WHERE id = ?", (design_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, "Design not found")
+    return printify.listing_fields(dict(row))
+
+
 @app.delete("/api/designs/{design_id}")
 def delete_design(design_id: int, _gate: None = Depends(require_access_code)):
     with db.connect() as con:
