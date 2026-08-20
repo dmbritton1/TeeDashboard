@@ -19,6 +19,33 @@ DEFAULT_TEE_COLORS = ("Black", "White", "Navy", "Sport Grey", "Sand")
 POSTER_VARIANT_MATCH = ("50x70", "19.7x27.6")
 
 
+def verify() -> tuple[bool, str]:
+    """Ask Printify whether this token and shop actually work, and remember the
+    answer. The dashboard polls /api/status every three seconds, so the answer
+    is stored rather than re-fetched - a network call in that path would put a
+    multi-second hang between the operator and their own dashboard."""
+    token = db.get_setting("printify_api_token")
+    shop = db.get_setting("printify_shop_id")
+    if not (token and shop):
+        return False, "Save a Printify token and shop ID first"
+    try:
+        r = requests.get(API + "/shops.json",
+                         headers={"Authorization": "Bearer %s" % token}, timeout=15)
+    except Exception as e:
+        # a network failure is not evidence the token is bad, so don't record one
+        return False, "Couldn't reach Printify: %s" % e
+    if r.status_code != 200:
+        db.set_setting("printify_verified", "0")
+        return False, "Printify says: %s" % r.text[:300]
+    shops = r.json()
+    if any(str(s.get("id")) == str(shop) for s in shops):
+        db.set_setting("printify_verified", "1")
+        return True, "Printify connected"
+    db.set_setting("printify_verified", "0")
+    names = ", ".join("%s (%s)" % (s.get("title"), s.get("id")) for s in shops) or "none"
+    return False, "Token works, but shop %s isn't on this account. Your shops: %s" % (shop, names)
+
+
 def _headers() -> dict:
     return {"Authorization": "Bearer %s" % db.get_setting("printify_api_token")}
 

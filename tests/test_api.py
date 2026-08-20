@@ -8,6 +8,7 @@ from fastapi import HTTPException
 import db
 import listing
 import pipeline
+import printify
 import worker
 
 
@@ -15,7 +16,15 @@ def load_main(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "test.db"))
     monkeypatch.setattr(worker, "start", lambda: None)
     import main
+    # main starts a background printify.verify() thread at import. It is stubbed
+    # for the duration of the reload only - the thread binds its target here, so
+    # the stub is what runs, and a test that sets a Printify token can never race
+    # that thread into a real network call. printify.verify itself is restored
+    # immediately, so tests that call it directly get the real one.
+    real_verify = printify.verify
+    monkeypatch.setattr(printify, "verify", lambda: (False, "stubbed in tests"))
     main = importlib.reload(main)
+    monkeypatch.setattr(printify, "verify", real_verify)
     monkeypatch.setattr(main, "BASE", str(tmp_path))
     return main
 
@@ -269,6 +278,36 @@ def test_test_printify_wrong_shop(tmp_path, monkeypatch):
                         lambda *a, **kw: FakeResp(200, payload=[{"id": 7, "title": "Other"}]))
     out = main.test_printify()
     assert out["ok"] is False and "42" in out["message"]
+
+
+def test_verify_stores_success(tmp_path, monkeypatch):
+    load_main(tmp_path, monkeypatch)   # for its DB_PATH monkeypatch
+    db.set_setting("printify_api_token", "tok")
+    db.set_setting("printify_shop_id", "99")
+    monkeypatch.setattr(printify.requests, "get",
+                        lambda *a, **k: FakeResp(200, payload=[{"id": 99, "title": "S"}]))
+    ok, _ = printify.verify()
+    assert ok and db.get_setting("printify_verified") == "1"
+
+
+def test_verify_stores_failure_on_a_dead_token(tmp_path, monkeypatch):
+    load_main(tmp_path, monkeypatch)   # for its DB_PATH monkeypatch
+    db.set_setting("printify_api_token", "dead")
+    db.set_setting("printify_shop_id", "99")
+    monkeypatch.setattr(printify.requests, "get",
+                        lambda *a, **k: FakeResp(401, payload={}, text="Unauthorized"))
+    ok, msg = printify.verify()
+    assert not ok and db.get_setting("printify_verified") == "0"
+    assert "Unauthorized" in msg
+
+
+def test_status_is_not_ready_until_verified(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    db.set_setting("printify_api_token", "tok")
+    db.set_setting("printify_shop_id", "99")
+    assert main.status()["printify_ready"] is False
+    db.set_setting("printify_verified", "1")
+    assert main.status()["printify_ready"] is True
 
 
 import refine

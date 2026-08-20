@@ -4,6 +4,7 @@ import datetime
 import io
 import os
 import tempfile
+import threading
 import zipfile
 
 import requests
@@ -35,6 +36,9 @@ with db.connect() as con:
     # requeue rows orphaned by a shutdown mid-generation
     con.execute("UPDATE designs SET status = 'queued', progress = 0 WHERE status = 'generating'")
 worker.start()
+# so printify_ready is answered within seconds of boot, rather than staying
+# false until the operator next saves settings
+threading.Thread(target=printify.verify, daemon=True).start()
 
 app = FastAPI(title="T-Shirt Design Pipeline")
 app.mount("/designs", StaticFiles(directory=os.path.join(BASE, "designs")), name="designs")
@@ -336,6 +340,8 @@ def publish(design_id: int, _gate: None = Depends(require_access_code)):
         msg = ("publish failed: %s" % e)[:500]
         with db.connect() as con:
             con.execute("UPDATE designs SET error = ? WHERE id = ?", (msg, design_id))
+        if "401" in str(e):
+            db.set_setting("printify_verified", "0")
         raise HTTPException(502, "Printify error: %s" % e)
     with db.connect() as con:
         con.execute(
@@ -376,6 +382,8 @@ def save_settings(body: SettingsBody, _gate: None = Depends(require_access_code)
     for k, v in body.model_dump().items():
         if v.strip():
             db.set_setting(k, v.strip())
+    if body.printify_api_token.strip() or body.printify_shop_id.strip():
+        threading.Thread(target=printify.verify, daemon=True).start()
     return {"ok": True}
 
 
@@ -398,24 +406,8 @@ def test_gemini():
 
 @app.post("/api/test/printify")
 def test_printify():
-    token = db.get_setting("printify_api_token")
-    shop = db.get_setting("printify_shop_id")
-    if not (token and shop):
-        return {"ok": False, "message": "Save a Printify token and shop ID first"}
-    try:
-        r = requests.get(
-            "https://api.printify.com/v1/shops.json",
-            headers={"Authorization": "Bearer %s" % token}, timeout=15,
-        )
-    except Exception as e:
-        return {"ok": False, "message": "Couldn't reach Printify: %s" % e}
-    if r.status_code != 200:
-        return {"ok": False, "message": "Printify says: %s" % r.text[:300]}
-    shops = r.json()
-    if any(str(s.get("id")) == str(shop) for s in shops):
-        return {"ok": True, "message": "Printify connected"}
-    names = ", ".join("%s (%s)" % (s.get("title"), s.get("id")) for s in shops) or "none"
-    return {"ok": False, "message": "Token works, but shop %s isn't on this account. Your shops: %s" % (shop, names)}
+    ok, message = printify.verify()
+    return {"ok": ok, "message": message}
 
 
 @app.get("/api/export.csv")
@@ -462,7 +454,9 @@ def status():
         "queued": queued,
         "local": pipeline.has_local(),
         "printify_ready": bool(
-            db.get_setting("printify_api_token") and db.get_setting("printify_shop_id")
+            db.get_setting("printify_api_token")
+            and db.get_setting("printify_shop_id")
+            and db.get_setting("printify_verified") == "1"
         ),
         "access_code": bool(db.get_setting("access_code")),
     }
