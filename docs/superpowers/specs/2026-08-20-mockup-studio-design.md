@@ -161,14 +161,32 @@ This is why the mockups are worth rendering in our own dashboard when the
 Printify ones were not: these are images Printify never sees, so there is no
 other place to look at them.
 
-## Verify first, before writing any of this
+## Redirect URI: resolved
 
-**Does Etsy accept a `localhost` redirect URI for a personal app?** If yes,
-connecting is a button click on the machine running the dashboard. If no, the
-callback has to route through the `share.py` tunnel, whose URL changes between
-runs, and the connect flow gets meaningfully more awkward — possibly a manual
-paste of the authorization code. This changes a whole section of the
-implementation and costs ten minutes to answer.
+Etsy's own documentation says the callback "must implement TLS and use an
+`https://` prefix" — but that word is *typically*, and it is guidance rather
+than a validator rule. In practice Etsy accepts an `http://localhost` callback:
+two independent public implementations register and use
+`http://localhost:3003/oauth/redirect`, and one has a maintenance history
+(a June 2024 fix to an auth loop) showing it genuinely runs.
+
+So the dashboard registers
+
+```
+http://localhost:8000/etsy/callback
+```
+
+in the Etsy app dashboard, matching the port `share.py` and the README already
+use. Connecting is a button in Settings, done once, from a browser on the
+machine running the dashboard — not over the tunnel, since the tunnel URL
+changes between runs and every redirect URI must match its registration
+exactly (case-sensitively).
+
+This rests on community evidence, not an Etsy guarantee. If Etsy tightens it,
+the fallback is the manual one: send the operator to the authorize URL and have
+them paste the `code` parameter back into Settings. Worth keeping the code path
+shaped so that fallback is a small change rather than a rewrite — the token
+exchange does not care where the code came from.
 
 ## Testing
 
