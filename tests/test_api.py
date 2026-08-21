@@ -488,6 +488,15 @@ def test_settings_roundtrips_the_poster_blueprint(tmp_path, monkeypatch):
     assert main.get_settings()["printify_poster_blueprint_id"] is True
 
 
+def test_new_printify_settings_round_trip(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    main.save_settings(main.SettingsBody(tee_colors="Black, Navy",
+                                         printify_print_provider_id="9"))
+    out = main.get_settings()
+    assert out["tee_colors"] == "Black, Navy"
+    assert out["printify_print_provider_id"] == "9"
+
+
 def test_settings_roundtrips_the_poster_refine_prompt(tmp_path, monkeypatch):
     main = load_main(tmp_path, monkeypatch)
     import refine

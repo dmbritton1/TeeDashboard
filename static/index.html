@@ -187,6 +187,15 @@
           <span class="hint" id="poster_blueprint_state"></span>
         </div>
         <div class="row">
+          <label>T-shirt colours</label>
+          <input type="text" id="tee_colors" placeholder="Black, White, Navy, Sport Grey, Sand">
+          <span class="hint">names must match your print provider's catalogue — more colours means more Printify mockups</span>
+        </div>
+        <div class="row">
+          <label>Print provider ID</label>
+          <input type="text" id="printify_provider" placeholder="leave blank for the first one" style="width:140px">
+        </div>
+        <div class="row">
           <button onclick="saveSettings()">Save</button>
           <button onclick="testConn('printify')">Test Printify</button>
           <span class="hint" id="test_printify"></span>

@@ -274,6 +274,8 @@ async function saveSettings() {
     printify_api_token: document.getElementById("printify_token").value,
     printify_shop_id: document.getElementById("printify_shop").value,
     printify_poster_blueprint_id: document.getElementById("printify_poster_blueprint").value,
+    tee_colors: document.getElementById("tee_colors").value,
+    printify_print_provider_id: document.getElementById("printify_provider").value,
     access_code: code,
     shop_context: document.getElementById("shop_context").value,
     listing_boilerplate: document.getElementById("listing_boilerplate").value,
@@ -952,6 +954,8 @@ async function loadPrompt() {
       s.printify_poster_blueprint_id ? "blueprint saved ✓" : "not set — posters can't publish yet";
     document.getElementById("shop_context").value = s.shop_context || "";
     document.getElementById("listing_boilerplate").value = s.listing_boilerplate || "";
+    document.getElementById("tee_colors").value = s.tee_colors || "";
+    document.getElementById("printify_provider").value = s.printify_print_provider_id || "";
     document.getElementById("listing_prompt").value = s.listing_prompt || "";
     promptLoaded = true;
   } catch (e) {}

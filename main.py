@@ -103,6 +103,8 @@ class SettingsBody(BaseModel):
     listing_prompt: str = ""
     listing_boilerplate: str = ""
     shop_context: str = ""
+    tee_colors: str = ""
+    printify_print_provider_id: str = ""
 
 
 def _product(name: str) -> str:
@@ -378,6 +380,8 @@ def get_settings():
     out["listing_prompt"] = db.get_setting("listing_prompt") or listing.DEFAULT_LISTING_PROMPT
     out["listing_boilerplate"] = db.get_setting("listing_boilerplate") or ""
     out["shop_context"] = db.get_setting("shop_context") or ""
+    out["tee_colors"] = ", ".join(printify.tee_colors())
+    out["printify_print_provider_id"] = db.get_setting("printify_print_provider_id") or ""
     return out
 
 
