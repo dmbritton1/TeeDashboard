@@ -487,7 +487,9 @@ function card(d) {
         : `<button onclick="openPreview(${d.id})">👁 Preview listing</button>`) +
       (stat.printify_ready
         ? `<button class="gilt" onclick="act(this,${d.id},'publish')">Publish to Printify</button>`
-        : `<button disabled>Publish to Printify</button><span class="tag">Printify not configured</span>`) +
+        : `<button disabled>Publish to Printify</button><span class="tag">${stat.printify_configured
+            ? "Printify unverified — press Test Printify in Settings"
+            : "Printify not configured"}</span>`) +
       (d.print_file ? '<span class="tag ok">print-ready ✓</span>' : '<span class="tag">upscaling…</span>'),
     queued: `<button onclick="removeDesign(this,${d.id},'cancel')">✕ Cancel</button>`,
     failed: `<button onclick="act(this,${d.id},'retry')">↻ Retry</button><button onclick="removeDesign(this,${d.id},'delete')">🗑 Delete</button>`,
@@ -778,6 +780,10 @@ async function renderPreview() {
   try {
     f = await api(`/api/designs/${d.id}/listing`);
   } catch (e) {
+    // Staleness first: a late failure of a superseded request must not close
+    // the lightbox the operator has since reopened on another design, taking
+    // their unsaved text with it.
+    if (lbId !== d.id || lbMode !== "listing") return;
     // Leaving lbId set with nothing on screen would silently kill the grid's
     // arrow keys, which bail while a lightbox is "open".
     closeLightbox();
@@ -795,8 +801,11 @@ async function renderPreview() {
   if (shell.contains(document.activeElement)) return;
   // main.py's clamp_title silently cuts an over-long title back to the last
   // comma, so say so. The box still holds what was typed until we repaint it.
+  // Only when what was typed was actually too long: the server canonicalises in
+  // other ways too - trimming, or swapping a cleared title for the phrase
+  // fallback - and calling those "shortened" is just wrong.
   const typed = shell.querySelector('textarea[data-f="listing_title"]');
-  if (typed && typed.value !== f.title) {
+  if (typed && typed.value.length > 140 && typed.value !== f.title) {
     flash(`Title shortened to ${f.title.length} characters to fit Etsy's 140`);
   }
   const tags = f.tags.map(t => `<span class="tag">${esc(t)}</span>`).join(" ");
@@ -814,7 +823,7 @@ async function renderPreview() {
     `<label>Description <span class="hint">hook plus your boilerplate, as Printify receives it</span></label>` +
     `<div class="lb-row desc">${esc(f.description)}</div>` +
     `<label>Hook (editable)</label>` +
-    `<textarea data-f="listing_hook" data-id="${d.id}" rows="4">${esc(d.listing_hook || "")}</textarea>` +
+    `<textarea data-f="listing_hook" data-id="${d.id}" rows="4">${esc(f.hook)}</textarea>` +
     `<div class="lb-row"><button onclick="closeLightbox()">Close</button></div></div>`;
   document.getElementById("lightbox").hidden = false;
 }
@@ -1017,9 +1026,10 @@ document.addEventListener("blur", async e => {
       body: JSON.stringify({[t.dataset.f]: t.value}),
     });
     // refresh() is async (and no-ops while a poll is already in flight), so the
-    // cached row is still the pre-edit one when renderPreview runs. The hook
-    // box reads from that cache, and without this it repaints the operator's
-    // just-typed hook back to the old text. Same trick as saveTags above.
+    // cached row is still the pre-edit one for up to three seconds. The card's
+    // "writing copy…" test reads that cache, so patch it in place rather than
+    // letting a just-saved design read as having no copy. Same trick as
+    // saveTags above. The preview's own fields all come from /listing.
     const cached = findDesign(Number(t.dataset.id));
     if (cached) cached[t.dataset.f] = t.value;
     refresh();

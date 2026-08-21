@@ -72,9 +72,11 @@ def test_select_variants_uses_the_colours_passed_in():
 
 
 def test_listing_fields_reports_the_configured_colours(tmp_path, monkeypatch):
+    # deliberately not alphabetical: the operator's order is the order Printify
+    # gets, and an alphabetical fixture could not tell that from a sorted list
     setup_tmp(tmp_path, monkeypatch)
-    db.set_setting("tee_colors", "Black, Navy")
-    assert printify.listing_fields({"phrase": "p", "product": "tee"})["colors"] == ["Black", "Navy"]
+    db.set_setting("tee_colors", "Navy, Black")
+    assert printify.listing_fields({"phrase": "p", "product": "tee"})["colors"] == ["Navy", "Black"]
 
 
 def test_listing_fields_has_no_colours_for_a_poster(tmp_path, monkeypatch):
@@ -233,6 +235,24 @@ def test_listing_fields_falls_back_to_the_old_title(tmp_path, monkeypatch):
     assert fields["title"] == "Dog Dad T-Shirt"
 
 
+def test_listing_fields_clamps_a_long_fallback_title(tmp_path, monkeypatch):
+    # no stored title, so the phrase builds one - and a long phrase must still
+    # come out under Etsy's 140 rather than being rejected at publish
+    setup_tmp(tmp_path, monkeypatch)
+    phrase = ", ".join(["a very wordy dog dad phrase"] * 8)
+    fields = printify.listing_fields({"phrase": phrase, "product": "tee"})
+    assert len(fields["title"]) <= listing.TITLE_MAX
+
+
+def test_listing_fields_carries_the_hook(tmp_path, monkeypatch):
+    # the preview edits the hook, and reads it from here rather than from the
+    # up-to-3s-stale poll cache
+    setup_tmp(tmp_path, monkeypatch)
+    assert printify.listing_fields(
+        {"phrase": "p", "product": "tee", "listing_hook": "A good dog."})["hook"] == "A good dog."
+    assert printify.listing_fields({"phrase": "p", "product": "tee"})["hook"] == ""
+
+
 def test_listing_fields_cleans_tags(tmp_path, monkeypatch):
     setup_tmp(tmp_path, monkeypatch)
     fields = printify.listing_fields(
@@ -266,6 +286,7 @@ def test_publish_sends_exactly_listing_fields(tmp_path, monkeypatch):
         [{"id": 7}] if "print_providers.json" in path else {"variants": TEE_VARIANTS}))
     png = tmp_path / "d.png"
     png.write_bytes(b"x")
+    db.set_setting("tee_colors", "Neon Pink")
     design = {"id": 1, "phrase": "dog dad", "product": "tee", "file": str(png),
               "listing_title": "Dog Dad Tee", "listing_tags": "dog dad, funny",
               "listing_hook": "A hook."}
@@ -276,6 +297,12 @@ def test_publish_sends_exactly_listing_fields(tmp_path, monkeypatch):
     assert sent["title"] == fields["title"]
     assert sent["description"] == fields["description"]
     assert sent["tags"] == fields["tags"]
+    # the two publish used to re-derive for itself: every enabled variant is a
+    # colour from fields, priced at fields' price
+    assert [v["price"] for v in sent["variants"]] == [fields["price_cents"]] * len(sent["variants"])
+    enabled = {v["id"] for v in sent["variants"]}
+    assert [v["options"]["color"] for v in TEE_VARIANTS if v["id"] in enabled] \
+        == fields["colors"]
 
 
 PROVIDERS = [{"id": 3, "title": "First"}, {"id": 9, "title": "Second"}]

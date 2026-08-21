@@ -118,9 +118,16 @@ def listing_fields(design: dict) -> dict:
     product = design.get("product") or pipeline.DEFAULT_PRODUCT
     data = pipeline.product_data(product)
     return {
-        "title": design.get("listing_title")
-                 or design["phrase"].title() + " " + data["title_suffix"],
+        # clamped here, not only in patch_design: the fallback title is built
+        # from the phrase and a long one would otherwise sail past Etsy's 140.
+        "title": listing.clamp_title(
+            design.get("listing_title")
+            or design["phrase"].title() + " " + data["title_suffix"]),
         "description": _description(design),
+        # the hook is half of description, and the preview edits it - reading it
+        # from here rather than the 3s-stale poll cache is what stops a blur
+        # from PATCHing an empty hook over copy that has already landed.
+        "hook": design.get("listing_hook") or "",
         "tags": listing.clean_tags(design.get("listing_tags") or ""),
         "price_cents": data["price_cents"],
         "colors": tee_colors() if product == "tee" else [],
@@ -138,7 +145,7 @@ def _provider_id(providers: list) -> int:
         for p in providers:
             if str(p["id"]) == str(want):
                 return int(p["id"])
-    return providers[0]["id"]
+    return int(providers[0]["id"])
 
 
 def publish(design: dict) -> str:
@@ -164,9 +171,12 @@ def publish(design: dict) -> str:
     all_variants = _get(
         "/catalog/blueprints/%d/print_providers/%d/variants.json" % (blueprint_id, pp_id)
     )["variants"]
-    variants = _select_variants(product, all_variants, tee_colors())
 
+    # Every listing value comes from this one dict - colours and price included.
+    # Re-deriving either here is how the preview and the publish drift apart.
     fields = listing_fields(design)
+    variants = _select_variants(product, all_variants, fields["colors"])
+
     product_json = _post(
         "/shops/%s/products.json" % shop_id,
         {
@@ -176,7 +186,7 @@ def publish(design: dict) -> str:
             "blueprint_id": blueprint_id,
             "print_provider_id": pp_id,
             "variants": [
-                {"id": v["id"], "price": data["price_cents"], "is_enabled": True}
+                {"id": v["id"], "price": fields["price_cents"], "is_enabled": True}
                 for v in variants
             ],
             "print_areas": [

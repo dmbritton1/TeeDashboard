@@ -103,8 +103,13 @@ class SettingsBody(BaseModel):
     listing_prompt: str = ""
     listing_boilerplate: str = ""
     shop_context: str = ""
-    tee_colors: str = ""
-    printify_print_provider_id: str = ""
+    # None, not "": these two are the settings whose blank state is meaningful
+    # (defaults / first provider), so save_settings has to tell "the operator
+    # cleared the box" from "this body never mentioned the field" - and most
+    # bodies don't, every single-key autosave included. Same shape as
+    # PatchBody.listing_title.
+    tee_colors: str | None = None
+    printify_print_provider_id: str | None = None
 
 
 def _product(name: str) -> str:
@@ -380,7 +385,11 @@ def get_settings():
     out["listing_prompt"] = db.get_setting("listing_prompt") or listing.DEFAULT_LISTING_PROMPT
     out["listing_boilerplate"] = db.get_setting("listing_boilerplate") or ""
     out["shop_context"] = db.get_setting("shop_context") or ""
-    out["tee_colors"] = ", ".join(printify.tee_colors())
+    # the stored value, not the resolved one: returning the defaults pre-fills the
+    # box, and the next Save would freeze today's defaults as an explicit per-shop
+    # setting that future default changes could never reach. The input's
+    # placeholder shows the defaults instead, same as the provider box.
+    out["tee_colors"] = db.get_setting("tee_colors") or ""
     out["printify_print_provider_id"] = db.get_setting("printify_print_provider_id") or ""
     return out
 
@@ -388,22 +397,24 @@ def get_settings():
 @app.post("/api/settings")
 def save_settings(body: SettingsBody, _gate: None = Depends(require_access_code)):
     for k, v in body.model_dump().items():
-        if v.strip():
+        if v and v.strip():
             db.set_setting(k, v.strip())
     # tee_colors and printify_print_provider_id are the two settings whose blank
-    # state is itself meaningful (defaults / first provider), and the only two the
-    # UI always repopulates from the stored value on load - so an empty submission
-    # here can only mean the operator deliberately cleared the box, never an
-    # untouched field. A stored "" reads back as unset (db.get_setting treats a
-    # falsy value like a missing row), so writing it makes tee_colors() fall back
-    # to DEFAULT_TEE_COLORS and _provider_id() fall back to the first provider,
-    # same as never having saved anything. Do not fold this into the loop above -
-    # the generic skip-empty guard is what stops a blank printify_api_token or
+    # state is itself meaningful (defaults / first provider), so clearing the box
+    # has to be a real save rather than a no-op. Most POSTs to this endpoint carry
+    # a single key - the Settings autosaves for the prompt boxes, the speed toggle,
+    # the model and poster-size pickers - so an absent field must be left alone;
+    # only a field the body actually sent, and sent empty, is a deliberate clear.
+    # A stored "" reads back as unset (db.get_setting treats a falsy value like a
+    # missing row), so writing it makes tee_colors() fall back to
+    # DEFAULT_TEE_COLORS and _provider_id() fall back to the first provider, same
+    # as never having saved anything. Do not fold this into the loop above - the
+    # generic skip-empty guard is what stops a blank printify_api_token or
     # gemini_api_key field from wiping a saved secret.
-    if not body.tee_colors.strip():
-        db.set_setting("tee_colors", "")
-    if not body.printify_print_provider_id.strip():
-        db.set_setting("printify_print_provider_id", "")
+    for k in ("tee_colors", "printify_print_provider_id"):
+        v = getattr(body, k)
+        if v is not None and not v.strip():
+            db.set_setting(k, "")
     if body.printify_api_token.strip() or body.printify_shop_id.strip():
         threading.Thread(target=printify.verify, daemon=True).start()
     return {"ok": True}
@@ -472,13 +483,17 @@ def status():
         queued = con.execute(
             "SELECT COUNT(*) AS c FROM designs WHERE status IN ('queued', 'generating')"
         ).fetchone()["c"]
+    configured = bool(db.get_setting("printify_api_token")
+                      and db.get_setting("printify_shop_id"))
     return {
         "queued": queued,
         "local": pipeline.has_local(),
-        "printify_ready": bool(
-            db.get_setting("printify_api_token")
-            and db.get_setting("printify_shop_id")
-            and db.get_setting("printify_verified") == "1"
-        ),
+        "printify_ready": configured and db.get_setting("printify_verified") == "1",
+        # verify() only runs at boot and on a settings save, and declines to
+        # record a verdict when the network is down - so "configured but not
+        # verified" is a routine state after one DNS blip at startup, not the
+        # same thing as an empty token. The front end offers Test Printify for
+        # it rather than labelling a working shop unconfigured.
+        "printify_configured": configured,
         "access_code": bool(db.get_setting("access_code")),
     }

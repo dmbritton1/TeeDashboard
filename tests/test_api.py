@@ -361,10 +361,18 @@ def test_publish_keeps_the_verified_flag_on_a_non_401(tmp_path, monkeypatch):
     assert db.get_setting("printify_verified") == "1"
 
 
-def test_status_is_not_ready_until_verified(tmp_path, monkeypatch):
+def test_status_tells_unconfigured_from_unverified_from_ready(tmp_path, monkeypatch):
+    """Three states, not two. verify() runs at boot and on a settings save, and
+    declines to record a verdict when the network is down - so one DNS blip at
+    startup leaves a correctly configured shop unverified, and calling that
+    'not configured' sends the operator hunting for a token that is already
+    there. printify_ready still means verified."""
     main = load_main(tmp_path, monkeypatch)
+    assert main.status()["printify_configured"] is False
+    assert main.status()["printify_ready"] is False
     db.set_setting("printify_api_token", "tok")
     db.set_setting("printify_shop_id", "99")
+    assert main.status()["printify_configured"] is True
     assert main.status()["printify_ready"] is False
     db.set_setting("printify_verified", "1")
     assert main.status()["printify_ready"] is True
@@ -497,18 +505,35 @@ def test_new_printify_settings_round_trip(tmp_path, monkeypatch):
     assert out["printify_print_provider_id"] == "9"
 
 
-def test_clearing_tee_colors_restores_the_defaults(tmp_path, monkeypatch):
+def test_settings_returns_the_stored_tee_colors_not_the_defaults(tmp_path, monkeypatch):
+    """Blank means blank. Pre-filling the box with the resolved defaults means the
+    next Save freezes today's defaults as an explicit per-shop setting - the same
+    trap listing_prompt is deliberately kept out of. The placeholder shows them."""
+    main = load_main(tmp_path, monkeypatch)
+    assert main.get_settings()["tee_colors"] == ""
+
+
+def test_tee_colors_stored_cleared_and_untouched(tmp_path, monkeypatch):
+    """Three cases, and the third is the one that matters: almost every POST to
+    this endpoint carries a single key (the prompt-box autosave fires 600ms after
+    any keystroke), and an absent field must leave the setting alone."""
     main = load_main(tmp_path, monkeypatch)
     main.save_settings(main.SettingsBody(tee_colors="Black, Navy"))
     assert printify.tee_colors() == ["Black", "Navy"]
+    # absent from the body entirely - what every other save posts
+    main.save_settings(main.SettingsBody(prompt_template="anything"))
+    assert printify.tee_colors() == ["Black", "Navy"]
+    # present and empty - the operator cleared the box
     main.save_settings(main.SettingsBody(tee_colors=""))
     assert printify.tee_colors() == list(printify.DEFAULT_TEE_COLORS)
 
 
-def test_clearing_print_provider_restores_the_first(tmp_path, monkeypatch):
+def test_print_provider_stored_cleared_and_untouched(tmp_path, monkeypatch):
     main = load_main(tmp_path, monkeypatch)
     providers = [{"id": 3, "title": "First"}, {"id": 9, "title": "Second"}]
     main.save_settings(main.SettingsBody(printify_print_provider_id="9"))
+    assert printify._provider_id(providers) == 9
+    main.save_settings(main.SettingsBody(prompt_template="anything"))
     assert printify._provider_id(providers) == 9
     main.save_settings(main.SettingsBody(printify_print_provider_id=""))
     assert printify._provider_id(providers) == 3
