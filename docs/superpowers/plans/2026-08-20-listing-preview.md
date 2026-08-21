@@ -48,7 +48,7 @@ Expected: `listing.py` exists; the log shows PR #1's commits beneath the spec co
 
 - [ ] **Step 4: Confirm the existing suite is green before changing anything**
 
-Run: `.venv/bin/pytest -q`
+Run: `../../../.venv/bin/pytest -q`
 Expected: 161 passed, 1 skipped. If this does not pass, stop — do not build on a red baseline.
 
 ---
@@ -135,7 +135,7 @@ def test_publish_sends_exactly_listing_fields(tmp_path, monkeypatch):
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `.venv/bin/pytest tests/test_printify.py -q -k listing_fields`
+Run: `../../../.venv/bin/pytest tests/test_printify.py -q -k listing_fields`
 Expected: FAIL with `AttributeError: module 'printify' has no attribute 'listing_fields'`
 
 - [ ] **Step 3: Implement `listing_fields`**
@@ -185,7 +185,7 @@ Leave the rest of the payload untouched.
 
 - [ ] **Step 5: Run the full suite**
 
-Run: `.venv/bin/pytest -q`
+Run: `../../../.venv/bin/pytest -q`
 Expected: all previous tests still pass, plus the five new ones.
 
 - [ ] **Step 6: Commit**
@@ -276,7 +276,7 @@ The two poster tests take the new argument too — pass `[]`, since the poster b
 
 - [ ] **Step 3: Run to verify failure**
 
-Run: `.venv/bin/pytest tests/test_printify.py -q`
+Run: `../../../.venv/bin/pytest tests/test_printify.py -q`
 Expected: FAIL — `tee_colors` undefined, and `_select_variants() takes 2 positional arguments but 3 were given`.
 
 - [ ] **Step 4: Implement**
@@ -319,7 +319,7 @@ In `publish()`, pass them through:
 
 - [ ] **Step 5: Run the full suite**
 
-Run: `.venv/bin/pytest -q`
+Run: `../../../.venv/bin/pytest -q`
 Expected: all pass. `grep -n COLORS printify.py` should show no surviving reference to the old constant.
 
 - [ ] **Step 6: Commit**
@@ -372,7 +372,7 @@ def test_unknown_provider_setting_falls_back_rather_than_failing(tmp_path, monke
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `.venv/bin/pytest tests/test_printify.py -q -k provider`
+Run: `../../../.venv/bin/pytest tests/test_printify.py -q -k provider`
 Expected: FAIL with `AttributeError: module 'printify' has no attribute '_provider_id'`
 
 - [ ] **Step 3: Implement**
@@ -397,7 +397,7 @@ In `publish()`, replace `pp_id = providers[0]["id"]` with `pp_id = _provider_id(
 
 - [ ] **Step 4: Run the full suite**
 
-Run: `.venv/bin/pytest -q`
+Run: `../../../.venv/bin/pytest -q`
 Expected: all pass.
 
 - [ ] **Step 5: Commit**
@@ -453,7 +453,7 @@ def test_listing_endpoint_404s_on_a_missing_design(tmp_path, monkeypatch):
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `.venv/bin/pytest tests/test_api.py -q -k listing_endpoint`
+Run: `../../../.venv/bin/pytest tests/test_api.py -q -k listing_endpoint`
 Expected: FAIL with `AttributeError: module 'main' has no attribute 'design_listing'`
 
 - [ ] **Step 3: Implement**
@@ -474,7 +474,7 @@ def design_listing(design_id: int):
 
 - [ ] **Step 4: Run the full suite**
 
-Run: `.venv/bin/pytest -q`
+Run: `../../../.venv/bin/pytest -q`
 Expected: all pass.
 
 - [ ] **Step 5: Commit**
@@ -549,7 +549,7 @@ and `import printify` alongside the existing imports.
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `.venv/bin/pytest tests/test_api.py -q -k "verify or not_ready"`
+Run: `../../../.venv/bin/pytest tests/test_api.py -q -k "verify or not_ready"`
 Expected: FAIL — `printify.verify` undefined.
 
 - [ ] **Step 3: Move the check into `printify.verify`**
@@ -636,7 +636,7 @@ makes a real network call.
 
 - [ ] **Step 5: Run the full suite**
 
-Run: `.venv/bin/pytest -q`
+Run: `../../../.venv/bin/pytest -q`
 Expected: all pass. Existing `test_printify` endpoint tests should still pass unchanged — the function's return shape is identical.
 
 - [ ] **Step 6: Commit**
@@ -802,7 +802,7 @@ def test_new_printify_settings_round_trip(tmp_path, monkeypatch):
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `.venv/bin/pytest tests/test_api.py -q -k new_printify_settings`
+Run: `../../../.venv/bin/pytest tests/test_api.py -q -k new_printify_settings`
 Expected: FAIL — `SettingsBody` has no such fields.
 
 - [ ] **Step 3: Implement the server side**
@@ -851,7 +851,7 @@ and in `loadPrompt`, beside the other assignments:
 
 - [ ] **Step 5: Run the full suite**
 
-Run: `.venv/bin/pytest -q`
+Run: `../../../.venv/bin/pytest -q`
 Expected: all pass.
 
 - [ ] **Step 6: Verify the round-trip in the browser**
@@ -869,7 +869,7 @@ git commit -m "feat: settings for tee colours and print provider"
 
 ## Done when
 
-- `.venv/bin/pytest -q` is green, above PR #1's 161 passed / 1 skipped.
+- `../../../.venv/bin/pytest -q` is green, above PR #1's 161 passed / 1 skipped.
 - `grep -n 'COLORS\|providers\[0\]' printify.py` returns nothing.
 - The approved card offers a preview, not an accordion, and the preview's fields save.
 - A dead Printify token shows as not connected on the dashboard.
