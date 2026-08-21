@@ -497,6 +497,23 @@ def test_new_printify_settings_round_trip(tmp_path, monkeypatch):
     assert out["printify_print_provider_id"] == "9"
 
 
+def test_clearing_tee_colors_restores_the_defaults(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    main.save_settings(main.SettingsBody(tee_colors="Black, Navy"))
+    assert printify.tee_colors() == ["Black", "Navy"]
+    main.save_settings(main.SettingsBody(tee_colors=""))
+    assert printify.tee_colors() == list(printify.DEFAULT_TEE_COLORS)
+
+
+def test_clearing_print_provider_restores_the_first(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    providers = [{"id": 3, "title": "First"}, {"id": 9, "title": "Second"}]
+    main.save_settings(main.SettingsBody(printify_print_provider_id="9"))
+    assert printify._provider_id(providers) == 9
+    main.save_settings(main.SettingsBody(printify_print_provider_id=""))
+    assert printify._provider_id(providers) == 3
+
+
 def test_settings_roundtrips_the_poster_refine_prompt(tmp_path, monkeypatch):
     main = load_main(tmp_path, monkeypatch)
     import refine

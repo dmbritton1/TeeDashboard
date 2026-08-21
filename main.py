@@ -390,6 +390,20 @@ def save_settings(body: SettingsBody, _gate: None = Depends(require_access_code)
     for k, v in body.model_dump().items():
         if v.strip():
             db.set_setting(k, v.strip())
+    # tee_colors and printify_print_provider_id are the two settings whose blank
+    # state is itself meaningful (defaults / first provider), and the only two the
+    # UI always repopulates from the stored value on load - so an empty submission
+    # here can only mean the operator deliberately cleared the box, never an
+    # untouched field. A stored "" reads back as unset (db.get_setting treats a
+    # falsy value like a missing row), so writing it makes tee_colors() fall back
+    # to DEFAULT_TEE_COLORS and _provider_id() fall back to the first provider,
+    # same as never having saved anything. Do not fold this into the loop above -
+    # the generic skip-empty guard is what stops a blank printify_api_token or
+    # gemini_api_key field from wiping a saved secret.
+    if not body.tee_colors.strip():
+        db.set_setting("tee_colors", "")
+    if not body.printify_print_provider_id.strip():
+        db.set_setting("printify_print_provider_id", "")
     if body.printify_api_token.strip() or body.printify_shop_id.strip():
         threading.Thread(target=printify.verify, daemon=True).start()
     return {"ok": True}
