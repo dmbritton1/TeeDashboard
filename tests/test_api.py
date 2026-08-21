@@ -8,6 +8,7 @@ from fastapi import HTTPException
 import db
 import listing
 import pipeline
+import printify
 import worker
 
 
@@ -15,7 +16,15 @@ def load_main(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "test.db"))
     monkeypatch.setattr(worker, "start", lambda: None)
     import main
+    # main starts a background printify.verify() thread at import. It is stubbed
+    # for the duration of the reload only - the thread binds its target here, so
+    # the stub is what runs, and a test that sets a Printify token can never race
+    # that thread into a real network call. printify.verify itself is restored
+    # immediately, so tests that call it directly get the real one.
+    real_verify = printify.verify
+    monkeypatch.setattr(printify, "verify", lambda: (False, "stubbed in tests"))
     main = importlib.reload(main)
+    monkeypatch.setattr(printify, "verify", real_verify)
     monkeypatch.setattr(main, "BASE", str(tmp_path))
     return main
 
@@ -271,6 +280,104 @@ def test_test_printify_wrong_shop(tmp_path, monkeypatch):
     assert out["ok"] is False and "42" in out["message"]
 
 
+def test_verify_stores_success(tmp_path, monkeypatch):
+    load_main(tmp_path, monkeypatch)   # for its DB_PATH monkeypatch
+    db.set_setting("printify_api_token", "tok")
+    db.set_setting("printify_shop_id", "99")
+    monkeypatch.setattr(printify.requests, "get",
+                        lambda *a, **k: FakeResp(200, payload=[{"id": 99, "title": "S"}]))
+    ok, _ = printify.verify()
+    assert ok and db.get_setting("printify_verified") == "1"
+
+
+def test_verify_stores_failure_on_a_dead_token(tmp_path, monkeypatch):
+    load_main(tmp_path, monkeypatch)   # for its DB_PATH monkeypatch
+    db.set_setting("printify_api_token", "dead")
+    db.set_setting("printify_shop_id", "99")
+    monkeypatch.setattr(printify.requests, "get",
+                        lambda *a, **k: FakeResp(401, payload={}, text="Unauthorized"))
+    ok, msg = printify.verify()
+    assert not ok and db.get_setting("printify_verified") == "0"
+    assert "Unauthorized" in msg
+
+
+def test_verify_records_nothing_when_the_network_fails(tmp_path, monkeypatch):
+    """A connection failure says nothing about the token - only Printify's own
+    answer may set the flag. Without this, a dropped wifi would grey out Publish
+    and read as 'your token is dead'."""
+    load_main(tmp_path, monkeypatch)   # for its DB_PATH monkeypatch
+    db.set_setting("printify_api_token", "tok")
+    db.set_setting("printify_shop_id", "99")
+
+    def boom(*a, **k):
+        raise printify.requests.ConnectionError("no route to host")
+
+    monkeypatch.setattr(printify.requests, "get", boom)
+    ok, msg = printify.verify()
+    assert not ok and "no route to host" in msg
+    assert db.get_setting("printify_verified") is None
+
+
+def _raises(err):
+    def publish(row):
+        raise err
+    return publish
+
+
+def _approved_for_publish(tmp_path):
+    """An approved row that clears every publish() guard, so a test reaches the
+    printify.publish call itself."""
+    db.set_setting("printify_api_token", "t")
+    db.set_setting("printify_shop_id", "s")
+    pf = tmp_path / "designs" / "9-print.png"
+    pf.parent.mkdir(exist_ok=True)
+    pf.write_bytes(b"png")
+    return insert("approved", file="designs/9-print.png", print_file="designs/9-print.png")
+
+
+def test_publish_clears_the_verified_flag_on_a_401(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    did = _approved_for_publish(tmp_path)
+    db.set_setting("printify_verified", "1")
+    err = printify.requests.HTTPError("401 Client Error", response=FakeResp(401))
+    monkeypatch.setattr(main.printify, "publish", _raises(err))
+    with pytest.raises(HTTPException):
+        main.publish(did)
+    assert db.get_setting("printify_verified") == "0"
+
+
+def test_publish_keeps_the_verified_flag_on_a_non_401(tmp_path, monkeypatch):
+    """A 404 on a URL that happens to contain 401 - a blueprint or shop ID -
+    must not demote a working token."""
+    main = load_main(tmp_path, monkeypatch)
+    did = _approved_for_publish(tmp_path)
+    db.set_setting("printify_verified", "1")
+    err = printify.requests.HTTPError(
+        "404 Client Error for url: https://api.printify.com/v1/catalog/blueprints/401.json",
+        response=FakeResp(404))
+    monkeypatch.setattr(main.printify, "publish", _raises(err))
+    with pytest.raises(HTTPException):
+        main.publish(did)
+    assert db.get_setting("printify_verified") == "1"
+
+
+def test_status_tells_unconfigured_from_unverified_from_ready(tmp_path, monkeypatch):
+    """Three states, not two. verify() runs at boot and on a settings save, and
+    declines to record a verdict when the network is down - so one DNS blip at
+    startup leaves a correctly configured shop unverified, and calling that
+    'not configured' sends the operator hunting for a token that is already
+    there. printify_ready still means verified."""
+    main = load_main(tmp_path, monkeypatch)
+    assert main.status()["printify_configured"] is False
+    assert main.status()["printify_ready"] is False
+    db.set_setting("printify_api_token", "tok")
+    db.set_setting("printify_shop_id", "99")
+    assert main.status()["printify_configured"] is True
+    assert main.status()["printify_ready"] is False
+    db.set_setting("printify_verified", "1")
+    assert main.status()["printify_ready"] is True
+
+
 import refine
 
 
@@ -387,6 +494,49 @@ def test_settings_roundtrips_the_poster_blueprint(tmp_path, monkeypatch):
     assert main.get_settings()["printify_poster_blueprint_id"] is False
     main.save_settings(main.SettingsBody(printify_poster_blueprint_id="1220"))
     assert main.get_settings()["printify_poster_blueprint_id"] is True
+
+
+def test_new_printify_settings_round_trip(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    main.save_settings(main.SettingsBody(tee_colors="Black, Navy",
+                                         printify_print_provider_id="9"))
+    out = main.get_settings()
+    assert out["tee_colors"] == "Black, Navy"
+    assert out["printify_print_provider_id"] == "9"
+
+
+def test_settings_returns_the_stored_tee_colors_not_the_defaults(tmp_path, monkeypatch):
+    """Blank means blank. Pre-filling the box with the resolved defaults means the
+    next Save freezes today's defaults as an explicit per-shop setting - the same
+    trap listing_prompt is deliberately kept out of. The placeholder shows them."""
+    main = load_main(tmp_path, monkeypatch)
+    assert main.get_settings()["tee_colors"] == ""
+
+
+def test_tee_colors_stored_cleared_and_untouched(tmp_path, monkeypatch):
+    """Three cases, and the third is the one that matters: almost every POST to
+    this endpoint carries a single key (the prompt-box autosave fires 600ms after
+    any keystroke), and an absent field must leave the setting alone."""
+    main = load_main(tmp_path, monkeypatch)
+    main.save_settings(main.SettingsBody(tee_colors="Black, Navy"))
+    assert printify.tee_colors() == ["Black", "Navy"]
+    # absent from the body entirely - what every other save posts
+    main.save_settings(main.SettingsBody(prompt_template="anything"))
+    assert printify.tee_colors() == ["Black", "Navy"]
+    # present and empty - the operator cleared the box
+    main.save_settings(main.SettingsBody(tee_colors=""))
+    assert printify.tee_colors() == list(printify.DEFAULT_TEE_COLORS)
+
+
+def test_print_provider_stored_cleared_and_untouched(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    providers = [{"id": 3, "title": "First"}, {"id": 9, "title": "Second"}]
+    main.save_settings(main.SettingsBody(printify_print_provider_id="9"))
+    assert printify._provider_id(providers) == 9
+    main.save_settings(main.SettingsBody(prompt_template="anything"))
+    assert printify._provider_id(providers) == 9
+    main.save_settings(main.SettingsBody(printify_print_provider_id=""))
+    assert printify._provider_id(providers) == 3
 
 
 def test_settings_roundtrips_the_poster_refine_prompt(tmp_path, monkeypatch):
@@ -507,3 +657,28 @@ def test_patch_can_clear_a_listing_field(tmp_path, monkeypatch):
     main.patch_design(did, main.PatchBody(listing_hook="something"))
     main.patch_design(did, main.PatchBody(listing_hook=""))
     assert _read(did)["listing_hook"] == ""
+
+
+def test_listing_endpoint_returns_the_publish_payload(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    did = insert("approved", listing_title="Dog Dad Tee", listing_tags="dog dad, funny",
+                 listing_hook="A hook.")
+    out = main.design_listing(did)
+    assert out["title"] == "Dog Dad Tee"
+    assert out["tags"] == ["dog dad", "funny"]
+    assert "A hook." in out["description"]
+    assert out["price_cents"] == 2499
+
+
+def test_listing_endpoint_includes_the_boilerplate(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    db.set_setting("listing_boilerplate", "Printed on demand.")
+    did = insert("approved", listing_hook="A hook.")
+    assert main.design_listing(did)["description"] == "A hook.\n\nPrinted on demand."
+
+
+def test_listing_endpoint_404s_on_a_missing_design(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+    with pytest.raises(HTTPException) as e:
+        main.design_listing(9999)
+    assert e.value.status_code == 404

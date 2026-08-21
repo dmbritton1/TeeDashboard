@@ -8,13 +8,42 @@ import listing
 import pipeline
 
 API = "https://api.printify.com/v1"
-COLORS = {"Black", "White"}
+# Printify renders mockups per enabled colour, so a narrow list is a direct
+# cause of a thin mockup set on the listing.
+DEFAULT_TEE_COLORS = ("Black", "White", "Navy", "Sport Grey", "Sand")
 # The 50x70cm variant's real name is unverified: this account's token 401s on the
 # poster catalogue, so these are plausible spellings rather than a fact. Once a
 # token with shop scope exists, correct this tuple - it is the only place to look.
 # Haystacks are lower-cased with spaces stripped before matching, so "50 x 70 cm"
 # matches "50x70" without needing its own entry.
 POSTER_VARIANT_MATCH = ("50x70", "19.7x27.6")
+
+
+def verify() -> tuple[bool, str]:
+    """Ask Printify whether this token and shop actually work, and remember the
+    answer. The dashboard polls /api/status every three seconds, so the answer
+    is stored rather than re-fetched - a network call in that path would put a
+    multi-second hang between the operator and their own dashboard."""
+    token = db.get_setting("printify_api_token")
+    shop = db.get_setting("printify_shop_id")
+    if not (token and shop):
+        return False, "Save a Printify token and shop ID first"
+    try:
+        r = requests.get(API + "/shops.json",
+                         headers={"Authorization": "Bearer %s" % token}, timeout=15)
+    except Exception as e:
+        # a network failure is not evidence the token is bad, so don't record one
+        return False, "Couldn't reach Printify: %s" % e
+    if r.status_code != 200:
+        db.set_setting("printify_verified", "0")
+        return False, "Printify says: %s" % r.text[:300]
+    shops = r.json()
+    if any(str(s.get("id")) == str(shop) for s in shops):
+        db.set_setting("printify_verified", "1")
+        return True, "Printify connected"
+    db.set_setting("printify_verified", "0")
+    names = ", ".join("%s (%s)" % (s.get("title"), s.get("id")) for s in shops) or "none"
+    return False, "Token works, but shop %s isn't on this account. Your shops: %s" % (shop, names)
 
 
 def _headers() -> dict:
@@ -43,7 +72,15 @@ def _blueprint(data: dict) -> int:
     return int(raw)
 
 
-def _select_variants(product: str, variants: list) -> list:
+def tee_colors() -> list[str]:
+    """Colours to enable on a tee. Names must match the print provider's
+    catalogue exactly; anything it doesn't recognise hits _select_variants'
+    existing fallback rather than publishing nothing."""
+    raw = db.get_setting("tee_colors") or ""
+    return [c.strip() for c in raw.split(",") if c.strip()] or list(DEFAULT_TEE_COLORS)
+
+
+def _select_variants(product: str, variants: list, colors: list) -> list:
     """The sellable variants for this product. Both paths keep the existing
     'or the first ten' fallback: against an unfamiliar catalogue, publishing
     narrow beats publishing nothing."""
@@ -54,7 +91,7 @@ def _select_variants(product: str, variants: list) -> list:
             if hit:
                 return hit
         return variants[:10]
-    return [v for v in variants if v["options"].get("color") in COLORS] or variants[:10]
+    return [v for v in variants if v["options"].get("color") in set(colors)] or variants[:10]
 
 
 def _description(design: dict) -> str:
@@ -67,6 +104,48 @@ def _description(design: dict) -> str:
     parts = [p.strip() for p in (design.get("listing_hook"),
                                  db.get_setting("listing_boilerplate")) if p and p.strip()]
     return "\n\n".join(parts) if parts else design["phrase"]
+
+
+def listing_fields(design: dict) -> dict:
+    """Everything about a listing that is decided before we talk to Printify.
+
+    Both the publish payload and the preview endpoint read this, so the
+    operator cannot be shown a listing that differs from the one that ships.
+    Deliberately excludes blueprint and print provider: those need the network,
+    and _blueprint() raises for a product with none configured, which would
+    turn a preview of an unconfigured poster into a 500.
+    """
+    product = design.get("product") or pipeline.DEFAULT_PRODUCT
+    data = pipeline.product_data(product)
+    return {
+        # clamped here, not only in patch_design: the fallback title is built
+        # from the phrase and a long one would otherwise sail past Etsy's 140.
+        "title": listing.clamp_title(
+            design.get("listing_title")
+            or design["phrase"].title() + " " + data["title_suffix"]),
+        "description": _description(design),
+        # the hook is half of description, and the preview edits it - reading it
+        # from here rather than the 3s-stale poll cache is what stops a blur
+        # from PATCHing an empty hook over copy that has already landed.
+        "hook": design.get("listing_hook") or "",
+        "tags": listing.clean_tags(design.get("listing_tags") or ""),
+        "price_cents": data["price_cents"],
+        "colors": tee_colors() if product == "tee" else [],
+        "product_label": data["label"],
+    }
+
+
+def _provider_id(providers: list) -> int:
+    """The configured print provider, or the first one. Providers differ in
+    both price and mockup library, so which one you get should not be an
+    accident of catalogue ordering - but an unknown id falls back rather than
+    raising, same habit as _select_variants."""
+    want = db.get_setting("printify_print_provider_id")
+    if want:
+        for p in providers:
+            if str(p["id"]) == str(want):
+                return int(p["id"])
+    return int(providers[0]["id"])
 
 
 def publish(design: dict) -> str:
@@ -87,24 +166,27 @@ def publish(design: dict) -> str:
     providers = _get("/catalog/blueprints/%d/print_providers.json" % blueprint_id)
     if not providers:
         raise RuntimeError("No print providers for blueprint %d" % blueprint_id)
-    pp_id = providers[0]["id"]
+    pp_id = _provider_id(providers)
 
     all_variants = _get(
         "/catalog/blueprints/%d/print_providers/%d/variants.json" % (blueprint_id, pp_id)
     )["variants"]
-    variants = _select_variants(product, all_variants)
+
+    # Every listing value comes from this one dict - colours and price included.
+    # Re-deriving either here is how the preview and the publish drift apart.
+    fields = listing_fields(design)
+    variants = _select_variants(product, all_variants, fields["colors"])
 
     product_json = _post(
         "/shops/%s/products.json" % shop_id,
         {
-            "title": design.get("listing_title")
-                     or design["phrase"].title() + " " + data["title_suffix"],
-            "description": _description(design),
-            "tags": listing.clean_tags(design.get("listing_tags") or ""),
+            "title": fields["title"],
+            "description": fields["description"],
+            "tags": fields["tags"],
             "blueprint_id": blueprint_id,
             "print_provider_id": pp_id,
             "variants": [
-                {"id": v["id"], "price": data["price_cents"], "is_enabled": True}
+                {"id": v["id"], "price": fields["price_cents"], "is_enabled": True}
                 for v in variants
             ],
             "print_areas": [
